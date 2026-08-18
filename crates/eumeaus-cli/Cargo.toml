@@ -1,0 +1,21 @@
+[package]
+name = "eumeaus-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "eumeaus"
+path = "src/main.rs"
+
+[dependencies]
+eumeaus-engine.workspace = true
+clap.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2.0.16"
+predicates = "3.1.2"
+tempfile = "3.13.0"

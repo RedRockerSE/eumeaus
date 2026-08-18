@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/eumeaus-engine",
+    "crates/eumeaus-plugin-host",
+    "crates/eumeaus-plugin-protocol",
+    "crates/eumeaus-plugin-sdk",
+    "crates/eumeaus-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/magjon/eumeaus"
+publish = false
+
+[workspace.dependencies]
+eumeaus-engine = { path = "crates/eumeaus-engine" }
+eumeaus-plugin-host = { path = "crates/eumeaus-plugin-host" }
+eumeaus-plugin-protocol = { path = "crates/eumeaus-plugin-protocol" }
+eumeaus-plugin-sdk = { path = "crates/eumeaus-plugin-sdk" }
+
+thiserror = "1.0.65"
+uuid = { version = "1.10.0", features = ["v4", "serde"] }
+serde = { version = "1.0.210", features = ["derive"] }
+clap = { version = "4.5.20", features = ["derive"] }
+
+[profile.dev]
+debug = 1

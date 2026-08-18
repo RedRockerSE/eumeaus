@@ -1,0 +1,13 @@
+[package]
+name = "eumeaus-plugin-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+eumeaus-plugin-protocol.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3.13.0"
