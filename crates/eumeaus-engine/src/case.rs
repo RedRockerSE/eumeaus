@@ -126,6 +126,7 @@ impl Case {
         let conn = Connection::open(path)?;
         apply_key(&conn, &hex_key)?;
         verify_decryption(&conn, path)?;
+        crate::scan::reconcile_orphaned_runs(&conn)?;
 
         let name = conn.query_row(
             "SELECT value FROM case_meta WHERE key = 'name'",
@@ -160,6 +161,15 @@ impl Case {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Test-only escape hatch: `scan.rs`'s tests need to poke
+    /// `scan_plugin_runs` rows directly (e.g. to simulate a crash by
+    /// forcing a row to `RUNNING`) to test crash reconciliation without
+    /// actually killing a process. Not part of the public API.
+    #[cfg(test)]
+    pub(crate) fn conn_mut(&mut self) -> &mut Connection {
+        &mut self.conn
     }
 
     pub fn export(&self, _dest: &Path, _format: ExportFormat) -> Result<(), EngineError> {
@@ -215,6 +225,16 @@ impl Case {
         crud::get_entity(&self.conn, id)
     }
 
+    /// Not in §3.1 either; backs `scan run --target-type --target-value`
+    /// (§3.4), which names a scan's target by key rather than id.
+    pub fn find_entity_by_key(
+        &self,
+        entity_type: EntityType,
+        key: &str,
+    ) -> Result<Option<Entity>, EngineError> {
+        crud::find_entity_by_key(&self.conn, entity_type, key)
+    }
+
     /// Also not in §3.1; backs `entity show`'s attribute listing.
     pub fn list_attribute_records(
         &self,
@@ -227,24 +247,36 @@ impl Case {
         crud::audit_trail(&self.conn, target)
     }
 
-    // --- Everything below is still a stub; lands in M3 (plugin host) and
-    // M4 (scan orchestration). ---
-
+    /// Runs `plugins` (or, if empty, every discovered plugin compatible
+    /// with `target`'s entity type) against `target`, blocking until every
+    /// one has reached SUCCESS/TIMEOUT/ERROR. See [`crate::scan::start`]
+    /// for why this takes more/different parameters than SPEC.md §3.1's
+    /// illustrative single-`PluginRef` signature.
     pub fn start_scan(
         &mut self,
-        _plugin: PluginRef,
-        _target: TargetEntity,
-        _config: ScanConfig,
+        plugins_dir: &Path,
+        plugins: Vec<PluginRef>,
+        target: TargetEntity,
+        config: ScanConfig,
+        trust_policy: crate::TrustPolicy,
     ) -> Result<ScanId, EngineError> {
-        Err(EngineError::NotImplemented("Case::start_scan"))
+        let plugin_names: Vec<String> = plugins.into_iter().map(|p| p.name).collect();
+        crate::scan::start(
+            &mut self.conn,
+            plugins_dir,
+            &plugin_names,
+            target,
+            config,
+            trust_policy,
+        )
     }
 
-    pub fn resume_scan(&mut self, _scan_id: ScanId) -> Result<(), EngineError> {
-        Err(EngineError::NotImplemented("Case::resume_scan"))
+    pub fn resume_scan(&mut self, scan_id: ScanId) -> Result<(), EngineError> {
+        crate::scan::resume(&mut self.conn, scan_id.0)
     }
 
-    pub fn scan_status(&self, _scan_id: ScanId) -> Result<ScanStatus, EngineError> {
-        Err(EngineError::NotImplemented("Case::scan_status"))
+    pub fn scan_status(&self, scan_id: ScanId) -> Result<ScanStatus, EngineError> {
+        crate::scan::status(&self.conn, scan_id.0)
     }
 }
 

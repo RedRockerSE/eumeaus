@@ -27,6 +27,10 @@ enum CliError {
     InvalidId(String, uuid::Error),
     #[error("specify exactly one of --entity, --relationship, --scan")]
     AmbiguousAuditTarget,
+    #[error(
+        "no {0} entity with key {1:?} exists in this case yet — add it first with `entity add`"
+    )]
+    UnknownScanTarget(String, String),
 }
 
 #[derive(Parser)]
@@ -154,8 +158,17 @@ enum PluginCmd {
 #[derive(Subcommand)]
 enum ScanCmd {
     Run {
+        /// Name of a single plugin to run. Omit to run every discovered
+        /// plugin compatible with --target-type (not in SPEC.md §3.4's
+        /// illustrative surface, which only shows a single required
+        /// --plugin — but ScanConfig's worker_pool only means anything
+        /// when a scan can invoke more than one plugin at once).
         #[arg(long)]
-        plugin: String,
+        plugin: Option<String>,
+        /// Not in SPEC.md §3.4 either — nothing there resolves where a
+        /// scan's plugin list comes from, so this makes it explicit.
+        #[arg(long = "plugins-dir", default_value = "plugins")]
+        plugins_dir: PathBuf,
         #[arg(long = "target-type")]
         target_type: String,
         #[arg(long = "target-value")]
@@ -377,22 +390,56 @@ fn run(cli: Cli) -> Result<(), CliError> {
             PluginCmd::Verify { .. } => not_implemented("plugin verify"),
         },
         Commands::Scan(cmd) => match cmd {
-            ScanCmd::Run { .. } => {
+            ScanCmd::Run {
+                plugin,
+                plugins_dir,
+                target_type,
+                target_value,
+                rate_limit,
+                proxy,
+                worker_pool,
+            } => {
                 let mut case = require_case(&cli.case)?;
-                case.start_scan(
-                    eumeaus_engine::PluginRef {
-                        name: "unset".to_string(),
+                let entity_type = EntityType::from_str(&target_type).expect("infallible");
+                let target = case
+                    .find_entity_by_key(entity_type, &target_value)?
+                    .ok_or_else(|| {
+                        CliError::UnknownScanTarget(target_type.clone(), target_value.clone())
+                    })?;
+                let plugins = plugin
+                    .into_iter()
+                    .map(|name| eumeaus_engine::PluginRef { name })
+                    .collect();
+                let scan_id = case.start_scan(
+                    &plugins_dir,
+                    plugins,
+                    eumeaus_engine::TargetEntity { id: target.id },
+                    eumeaus_engine::ScanConfig {
+                        worker_pool,
+                        rate_limit_per_sec: rate_limit,
+                        proxy,
                     },
-                    eumeaus_engine::TargetEntity {
-                        id: eumeaus_engine::EntityId(uuid::Uuid::nil()),
-                    },
-                    eumeaus_engine::ScanConfig::default(),
-                )
-                .map(|_| ())
-                .map_err(CliError::from)
+                    // No trust-key configuration exists yet (that's
+                    // credential/config management, M6+): every plugin
+                    // loads unsigned until it does.
+                    eumeaus_engine::TrustPolicy::AllowUnsigned,
+                )?;
+                println!("{scan_id}");
+                Ok(())
             }
-            ScanCmd::Status { .. } => not_implemented("scan status"),
-            ScanCmd::Resume { .. } => not_implemented("scan resume"),
+            ScanCmd::Status { scan_id } => {
+                let case = require_case(&cli.case)?;
+                let id = eumeaus_engine::ScanId(parse_uuid(&scan_id)?);
+                println!("{}", case.scan_status(id)?);
+                Ok(())
+            }
+            ScanCmd::Resume { scan_id } => {
+                let mut case = require_case(&cli.case)?;
+                let id = eumeaus_engine::ScanId(parse_uuid(&scan_id)?);
+                case.resume_scan(id)?;
+                println!("{}", case.scan_status(id)?);
+                Ok(())
+            }
             ScanCmd::List => not_implemented("scan list"),
         },
         Commands::Credential(cmd) => match cmd {

@@ -56,6 +56,25 @@ pub(crate) fn get_entity(conn: &Connection, id: EntityId) -> Result<Entity, Engi
     .ok_or(EngineError::EntityNotFound(id))
 }
 
+/// Looks up an entity the same way exact-key auto-merge would ((entity_type,
+/// normalized key)) — used by `scan run --target-type --target-value`
+/// (SPEC.md §3.4) to resolve a scan's target without requiring callers to
+/// already know its `EntityId`.
+pub(crate) fn find_entity_by_key(
+    conn: &Connection,
+    entity_type: EntityType,
+    key: &str,
+) -> Result<Option<Entity>, EngineError> {
+    conn.query_row(
+        "SELECT id, entity_type, canonical_key, display_label FROM entities
+         WHERE entity_type = ?1 AND canonical_key = ?2",
+        params![entity_type.to_string(), normalize_key(key)],
+        entity_from_row,
+    )
+    .optional()
+    .map_err(EngineError::from)
+}
+
 pub(crate) fn list_entities(
     conn: &Connection,
     filter: EntityFilter,
@@ -93,6 +112,57 @@ pub(crate) fn add_entity(
     attrs: Vec<Attribute>,
     provenance: Provenance,
 ) -> Result<EntityId, EngineError> {
+    let display_label = key.clone();
+    add_entity_impl(
+        conn,
+        entity_type,
+        key,
+        display_label,
+        attrs,
+        provenance,
+        ConfidenceStatus::Found,
+        None,
+    )
+}
+
+/// Same as [`add_entity`], but for a plugin-sourced finding during a scan
+/// (M4): carries the plugin's own confidence for this finding, a distinct
+/// `display_label` (a plugin's `EntityFinding.display_label` need not equal
+/// its `canonical_key`), and tags the resulting fact with `scan_id`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn add_entity_from_scan(
+    conn: &mut Connection,
+    entity_type: EntityType,
+    key: Option<String>,
+    display_label: Option<String>,
+    attrs: Vec<Attribute>,
+    provenance: Provenance,
+    confidence: ConfidenceStatus,
+    scan_id: Uuid,
+) -> Result<EntityId, EngineError> {
+    add_entity_impl(
+        conn,
+        entity_type,
+        key,
+        display_label,
+        attrs,
+        provenance,
+        confidence,
+        Some(scan_id),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_entity_impl(
+    conn: &mut Connection,
+    entity_type: EntityType,
+    key: Option<String>,
+    display_label: Option<String>,
+    attrs: Vec<Attribute>,
+    provenance: Provenance,
+    confidence: ConfidenceStatus,
+    scan_id: Option<Uuid>,
+) -> Result<EntityId, EngineError> {
     let entity_type_str = entity_type.to_string();
     let canonical_key = key.as_deref().map(normalize_key);
     let now = now_unix_ms();
@@ -120,7 +190,7 @@ pub(crate) fn add_entity(
         }
         None => {
             let id = Uuid::new_v4();
-            let display_label = key.clone().unwrap_or_else(|| entity_type_str.clone());
+            let display_label = display_label.unwrap_or_else(|| entity_type_str.clone());
             tx.execute(
                 "INSERT INTO entities (id, entity_type, canonical_key, display_label, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
@@ -135,13 +205,14 @@ pub(crate) fn add_entity(
         "INSERT INTO facts
             (id, entity_id, relationship_id, scan_id, source, source_version,
              confidence_status, source_url, retrieval_method, raw_response_sha256, collected_at)
-         VALUES (?1, ?2, NULL, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             fact_id.to_string(),
             entity_id.to_string(),
+            scan_id.map(|id| id.to_string()),
             provenance.source,
             provenance.source_version,
-            ConfidenceStatus::Found.to_string(),
+            confidence.to_string(),
             provenance.source_url,
             provenance.retrieval_method,
             provenance.raw_response_sha256,
@@ -322,6 +393,54 @@ pub(crate) fn add_relationship(
     attrs: Vec<Attribute>,
     provenance: Provenance,
 ) -> Result<RelationshipId, EngineError> {
+    add_relationship_impl(
+        conn,
+        from,
+        to,
+        rel_type,
+        attrs,
+        provenance,
+        ConfidenceStatus::Found,
+        None,
+    )
+}
+
+/// Same as [`add_relationship`], but for a plugin-sourced finding during a
+/// scan (M4) — see [`add_entity_from_scan`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn add_relationship_from_scan(
+    conn: &mut Connection,
+    from: EntityId,
+    to: EntityId,
+    rel_type: RelationshipType,
+    attrs: Vec<Attribute>,
+    provenance: Provenance,
+    confidence: ConfidenceStatus,
+    scan_id: Uuid,
+) -> Result<RelationshipId, EngineError> {
+    add_relationship_impl(
+        conn,
+        from,
+        to,
+        rel_type,
+        attrs,
+        provenance,
+        confidence,
+        Some(scan_id),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_relationship_impl(
+    conn: &mut Connection,
+    from: EntityId,
+    to: EntityId,
+    rel_type: RelationshipType,
+    attrs: Vec<Attribute>,
+    provenance: Provenance,
+    confidence: ConfidenceStatus,
+    scan_id: Option<Uuid>,
+) -> Result<RelationshipId, EngineError> {
     let tx = conn.transaction()?;
     ensure_entity_exists(&tx, from)?;
     ensure_entity_exists(&tx, to)?;
@@ -345,13 +464,14 @@ pub(crate) fn add_relationship(
         "INSERT INTO facts
             (id, entity_id, relationship_id, scan_id, source, source_version,
              confidence_status, source_url, retrieval_method, raw_response_sha256, collected_at)
-         VALUES (?1, NULL, ?2, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         VALUES (?1, NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             fact_id.to_string(),
             rel_id.to_string(),
+            scan_id.map(|id| id.to_string()),
             provenance.source,
             provenance.source_version,
-            ConfidenceStatus::Found.to_string(),
+            confidence.to_string(),
             provenance.source_url,
             provenance.retrieval_method,
             provenance.raw_response_sha256,

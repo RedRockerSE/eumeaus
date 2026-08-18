@@ -8,6 +8,7 @@
 mod case;
 mod crud;
 mod keystore;
+mod scan;
 
 use std::path::PathBuf;
 
@@ -15,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use case::{Case, ExportFormat};
+pub use eumeaus_plugin_host::TrustPolicy;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -42,6 +44,18 @@ pub enum EngineError {
     FactNotFound(FactId, EntityId),
     #[error("cannot merge an entity with itself: {0}")]
     CannotMergeSelf(EntityId),
+    #[error("scan not found: {0}")]
+    ScanNotFound(ScanId),
+    #[error("no discovered plugin in {0} is compatible with entity type {1}")]
+    NoCompatiblePlugins(PathBuf, String),
+    #[error("plugin {0} was requested but is not a discovered, compatible plugin")]
+    UnknownPlugin(String),
+    #[error("stored scan config is invalid: {0}")]
+    InvalidScanConfig(String),
+    #[error("plugin host error: {0}")]
+    PluginHost(#[from] eumeaus_plugin_host::PluginError),
+    #[error("scan config serialization error: {0}")]
+    ScanConfigJson(#[from] serde_json::Error),
 }
 
 pub type CaseError = EngineError;
@@ -213,6 +227,23 @@ impl std::fmt::Display for ConfidenceStatus {
     }
 }
 
+impl ConfidenceStatus {
+    /// Maps `eumeaus_plugin_protocol::ConfidenceStatus`'s raw `i32` (as
+    /// stored on `CheckResult.status`) without a direct type dependency —
+    /// engine only needs the four discriminant values, not the generated
+    /// protocol enum itself. Values 0 (unspecified) and anything
+    /// unrecognized fold into `Error`, matching "a plugin that won't say
+    /// what it found is indistinguishable from one that failed."
+    pub(crate) fn from_protocol_i32(value: i32) -> Self {
+        match value {
+            1 => Self::Found,
+            2 => Self::NotFound,
+            3 => Self::Uncertain,
+            _ => Self::Error,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attribute {
     pub key: String,
@@ -278,25 +309,59 @@ pub struct AttributeRecord {
     pub conflicting: bool,
 }
 
+#[derive(Debug, Clone)]
 pub struct PluginRef {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct TargetEntity {
     pub id: EntityId,
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ScanConfig {
     pub worker_pool: Option<u32>,
     pub rate_limit_per_sec: Option<u32>,
     pub proxy: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanStatus {
     Pending,
     Running,
     Completed,
     PartiallyFailed,
     Aborted,
+}
+
+impl std::fmt::Display for ScanStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "PENDING"),
+            Self::Running => write!(f, "RUNNING"),
+            Self::Completed => write!(f, "COMPLETED"),
+            Self::PartiallyFailed => write!(f, "PARTIALLY_FAILED"),
+            Self::Aborted => write!(f, "ABORTED"),
+        }
+    }
+}
+
+impl std::str::FromStr for ScanStatus {
+    type Err = EngineError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "PENDING" => Self::Pending,
+            "RUNNING" => Self::Running,
+            "COMPLETED" => Self::Completed,
+            "PARTIALLY_FAILED" => Self::PartiallyFailed,
+            "ABORTED" => Self::Aborted,
+            other => {
+                return Err(EngineError::InvalidScanConfig(format!(
+                    "unrecognized scan status {other:?}"
+                )))
+            }
+        })
+    }
 }

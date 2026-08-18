@@ -9,9 +9,20 @@ publish.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher"] }
 keyring = "4.1.6"
 getrandom = "0.4.3"
+eumeaus-plugin-host.workspace = true
+ed25519-dalek.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync", "macros"] }
 
 [dev-dependencies]
 tempfile = "3.13.0"
+# Only used to build examples/scan_*.rs (test-fixture plugins for M4's
+# scan-orchestration tests) — examples aren't compiled by plain
+# `cargo build`, only by `cargo test`, so this never leaks into a
+# production build. See eumeaus-plugin-host/Cargo.toml for the same
+# pattern, explained in more detail.
+eumeaus-plugin-sdk.workspace = true
+eumeaus-plugin-protocol.workspace = true

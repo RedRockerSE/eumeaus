@@ -3,12 +3,13 @@
 A local-first, plugin-extensible OSINT case management tool for investigators.
 See [`SPEC.md`](./SPEC.md) for the full design.
 
-**Status:** M0–M3 done. Case lifecycle over real SQLCipher (M1); manual
+**Status:** M0–M4 done. Case lifecycle over real SQLCipher (M1); manual
 entity/relationship CRUD, merge/split, and audit trail via the CLI (M2);
 plugin manifest validation and real subprocess/gRPC spawn, handshake,
-invoke, and timeout handling in `eumeaus-plugin-host` (M3, not yet wired
-into scans). Scan orchestration and credentials are still stubs returning
-`NotImplemented` — see `SPEC.md` §7 for the milestone order.
+invoke, and timeout handling (M3); and scan orchestration — worker pool,
+rate limiting, crash-safe resumability, result auto-merge — wired end to
+end through `scan run`/`status`/`resume` (M4). Credentials are still a stub
+returning `NotImplemented` — see `SPEC.md` §7 for the milestone order.
 
 ## Workspace layout
 
