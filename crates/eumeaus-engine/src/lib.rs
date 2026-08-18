@@ -1,14 +1,20 @@
 //! `eumeaus-engine` — case lifecycle, the entity/relationship/provenance
 //! data model, entity resolution, and scan orchestration.
 //!
-//! STUB CRATE (milestone M0). Every `Case` method returns
-//! [`EngineError::NotImplemented`]; real behavior lands in M1 (case
-//! lifecycle/persistence) and M2 (entity/relationship CRUD).
+//! Case lifecycle (create/open/close) is implemented over a
+//! SQLCipher-encrypted SQLite file (M1); entity/relationship CRUD, merge/
+//! split, and scan orchestration are still stubs returning
+//! [`EngineError::NotImplemented`] (M2+).
 
-use std::path::{Path, PathBuf};
+mod case;
+mod keystore;
+
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+pub use case::{Case, ExportFormat};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -16,8 +22,20 @@ pub enum EngineError {
     NotImplemented(&'static str),
     #[error("case already open: {0}")]
     CaseAlreadyOpen(PathBuf),
+    #[error("case not found: {0}")]
+    CaseNotFound(PathBuf),
+    #[error("case already exists: {0}")]
+    CaseAlreadyExists(PathBuf),
+    #[error("case file {0} is corrupt or tampered: {1}")]
+    CaseCorrupt(PathBuf, String),
+    #[error("OS keychain error: {0}")]
+    Keychain(String),
+    #[error("no encryption key found in the OS keychain for case {0} (created on a different machine or keychain entry removed?)")]
+    KeyNotFound(Uuid),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("database error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
 }
 
 pub type CaseError = EngineError;
@@ -112,11 +130,6 @@ pub struct AuditEvent {
     pub occurred_at_unix_ms: i64,
 }
 
-pub enum ExportFormat {
-    Sqlite,
-    Report,
-}
-
 pub struct PluginRef {
     pub name: String,
 }
@@ -138,98 +151,4 @@ pub enum ScanStatus {
     Completed,
     PartiallyFailed,
     Aborted,
-}
-
-/// Opaque handle over an open, decrypted case DB connection + file lock.
-///
-/// STUB: does not yet open a real SQLCipher-encrypted database or acquire a
-/// file lock. See SPEC.md §4.1 and milestone M1.
-pub struct Case {
-    path: PathBuf,
-}
-
-impl Case {
-    pub fn create(_path: &Path, _name: &str) -> Result<Case, CaseError> {
-        Err(EngineError::NotImplemented("Case::create"))
-    }
-
-    pub fn open(_path: &Path) -> Result<Case, CaseError> {
-        Err(EngineError::NotImplemented("Case::open"))
-    }
-
-    pub fn close(self) -> Result<(), CaseError> {
-        Err(EngineError::NotImplemented("Case::close"))
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn export(&self, _dest: &Path, _format: ExportFormat) -> Result<(), CaseError> {
-        Err(EngineError::NotImplemented("Case::export"))
-    }
-
-    pub fn add_entity(
-        &mut self,
-        _entity_type: EntityType,
-        _key: Option<String>,
-        _attrs: Vec<Attribute>,
-        _provenance: Provenance,
-    ) -> Result<EntityId, EngineError> {
-        Err(EngineError::NotImplemented("Case::add_entity"))
-    }
-
-    pub fn merge_entities(
-        &mut self,
-        _a: EntityId,
-        _b: EntityId,
-        _actor: Actor,
-    ) -> Result<EntityId, EngineError> {
-        Err(EngineError::NotImplemented("Case::merge_entities"))
-    }
-
-    pub fn split_entity(
-        &mut self,
-        _id: EntityId,
-        _fact_ids: Vec<FactId>,
-        _actor: Actor,
-    ) -> Result<EntityId, EngineError> {
-        Err(EngineError::NotImplemented("Case::split_entity"))
-    }
-
-    pub fn add_relationship(
-        &mut self,
-        _from: EntityId,
-        _to: EntityId,
-        _rel_type: RelationshipType,
-        _attrs: Vec<Attribute>,
-        _provenance: Provenance,
-    ) -> Result<RelationshipId, EngineError> {
-        Err(EngineError::NotImplemented("Case::add_relationship"))
-    }
-
-    pub fn list_entities(&self, _filter: EntityFilter) -> Result<Vec<Entity>, EngineError> {
-        Err(EngineError::NotImplemented("Case::list_entities"))
-    }
-
-    pub fn audit_trail(&self, _target: AuditTarget) -> Result<Vec<AuditEvent>, EngineError> {
-        Err(EngineError::NotImplemented("Case::audit_trail"))
-    }
-
-    pub fn start_scan(
-        &mut self,
-        _plugin: PluginRef,
-        _target: TargetEntity,
-        _config: ScanConfig,
-    ) -> Result<ScanId, EngineError> {
-        Err(EngineError::NotImplemented("Case::start_scan"))
-    }
-
-    pub fn resume_scan(&mut self, _scan_id: ScanId) -> Result<(), EngineError> {
-        Err(EngineError::NotImplemented("Case::resume_scan"))
-    }
-
-    pub fn scan_status(&self, _scan_id: ScanId) -> Result<ScanStatus, EngineError> {
-        Err(EngineError::NotImplemented("Case::scan_status"))
-    }
 }

@@ -3,8 +3,11 @@
 A local-first, plugin-extensible OSINT case management tool for investigators.
 See [`SPEC.md`](./SPEC.md) for the full design.
 
-**Status:** scaffolding stage (milestone M0). No business logic is implemented
-yet — every engine/plugin-host method returns `NotImplemented`.
+**Status:** M0 (scaffolding) and M1 (case lifecycle & encrypted persistence)
+done. `Case::create`/`open`/`close` work over real SQLCipher with OS-keychain
+key storage. Everything else (entity/relationship CRUD, plugins, scans) is
+still a stub returning `NotImplemented` — see `SPEC.md` §7 for the milestone
+order.
 
 ## Workspace layout
 

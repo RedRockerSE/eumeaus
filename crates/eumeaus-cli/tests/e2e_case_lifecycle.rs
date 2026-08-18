@@ -5,9 +5,12 @@
 //!    unreadable by plain sqlite3 without the OS-keychain key."
 //!
 //! Drives the actual `eumeaus` binary, not internal engine APIs, per
-//! SPEC.md §6. This is expected to FAIL until `Case::create`/`Case::open`
-//! are implemented (currently `EngineError::NotImplemented`) — that failure
-//! is the point: it is the acceptance test for M1, not a smoke test for M0.
+//! SPEC.md §6. `Case::create`/`Case::open` are implemented (M1 is done), so
+//! this now passes; it was the acceptance test for M1's "done" and stays as
+//! a regression test.
+//!
+//! Requires a running, unlocked OS Secret Service (see `CLAUDE.md`
+//! "Gotchas") since `case create`/`case open` touch the real OS keychain.
 //!
 //! Assumed convention (not yet specified elsewhere): `case create <name>
 //! --path <dir>` creates `<dir>/<name>.eum`.
@@ -17,6 +20,10 @@ use std::process::Command;
 use assert_cmd::Command as AssertCommand;
 use predicates::prelude::*;
 
+// Known cost: each run leaves an orphaned key in the real OS keychain
+// (service "eumeaus", entry = a fresh random case UUID). This test drives
+// the CLI as a black box per SPEC.md §6, and there's no CLI surface yet to
+// clean that up (`credential remove` is M6) — harmless, but see CLAUDE.md.
 #[test]
 fn case_create_open_round_trip_and_encryption_at_rest() {
     let tmp = tempfile::tempdir().expect("create tempdir");

@@ -43,8 +43,13 @@ before merge.
 - Credentials are never passed via subprocess argv or env vars (visible to
   other processes) — injected into the gRPC request body by the plugin host.
 - `.eum` case files are SQLCipher-encrypted SQLite; opening one takes an
-  exclusive OS file lock. A stub `Case::open`/`Case::create` currently returns
-  `EngineError::NotImplemented` — this is expected until M1 lands.
+  exclusive OS file lock (`Case::open`/`create`/`close` are implemented, M1).
+  The key lives in the OS keychain under service `"eumeaus"`, entry =
+  the case's UUID — never in the case file itself.
+- A case's UUID has to be known *before* the DB can be decrypted (to look
+  the key up), but it's also stored inside the encrypted DB — so a plaintext
+  sidecar file `<name>.eum.meta` (just the UUID) sits next to each case file
+  to break that chicken-and-egg. It carries no secret.
 
 ## Repo etiquette
 
@@ -53,14 +58,20 @@ before merge.
 
 ## Current status
 
-Milestone M0 (workspace scaffolding) is done: workspace builds, `eumeaus-cli
---help` runs. Every engine/plugin-host method is a stub returning
-`NotImplemented`. `crates/eumeaus-cli/tests/e2e_case_lifecycle.rs` is the
-acceptance test for **M1** and is expected to fail until `Case::create`/
-`Case::open` are implemented — see SPEC.md §7 for the milestone order.
+M0 (workspace scaffolding) and M1 (case lifecycle & encrypted persistence)
+are done: `Case::create`/`open`/`close` work over real SQLCipher, with
+OS-keychain key storage and an exclusive file lock. Entity/relationship
+CRUD, merge/split, and scan orchestration (M2+) are still stubs returning
+`EngineError::NotImplemented` — see SPEC.md §7 for the milestone order.
 
 ## Gotchas
 
+- `cargo test` needs a running, *unlocked* OS Secret Service (gnome-keyring
+  or equivalent) — any test that calls `Case::create`/`open` stores/reads a
+  real key there. Works out of the box in a normal desktop session; CI
+  starts one explicitly (see `.github/workflows/ci.yml`). In a headless/SSH
+  shell with no keyring daemon, these tests will hang or fail on
+  `EngineError::Keychain`.
 - No `protoc` is assumed to be installed; `eumeaus-plugin-protocol` ships a
   hand-written `stub` module mirroring `plugin.proto` until real
   tonic-build/prost-build codegen is wired up in M3.

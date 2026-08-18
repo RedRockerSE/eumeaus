@@ -28,5 +28,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Case files are encrypted with a key stored in the OS keychain
+      # (Secret Service on Linux); ubuntu-latest has a D-Bus session but no
+      # keyring daemon by default, so tests touching Case::create/open need
+      # one started and unlocked first. Login password is arbitrary — it
+      # just has to be supplied once to create+unlock a fresh keyring.
+      - name: Start gnome-keyring for OS-credential-store-backed tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnome-keyring
+          gnome-keyring-daemon --components=secrets --daemonize --unlock <<< 'ci-unlock'
       - name: cargo test
         run: cargo test --workspace

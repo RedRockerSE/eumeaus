@@ -1,0 +1,401 @@
+//! `Case` lifecycle: create/open/close over a SQLCipher-encrypted SQLite
+//! file (SPEC.md §4.1). The encryption key lives in the OS-native
+//! credential store, referenced by the case's UUID (see [`crate::keystore`]);
+//! it never touches the case file itself.
+//!
+//! Opening a case requires knowing its UUID before the database can be
+//! decrypted, which is itself stored *inside* the encrypted database — so a
+//! small plaintext sidecar file (`<case>.eum.meta`, just the UUID) sits next
+//! to the case file purely to break that chicken-and-egg. It carries no
+//! secret; the encryption key stays in the OS keychain.
+
+use std::fs::{self, File, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use rusqlite::{params, Connection, ErrorCode};
+use uuid::Uuid;
+
+use crate::{
+    keystore, Actor, Attribute, AuditEvent, AuditTarget, EngineError, Entity, EntityFilter,
+    EntityId, EntityType, FactId, PluginRef, Provenance, RelationshipId, RelationshipType,
+    ScanConfig, ScanId, ScanStatus, TargetEntity,
+};
+
+const SCHEMA_SQL: &str = include_str!("schema.sql");
+const SCHEMA_VERSION: &str = "1";
+
+pub enum ExportFormat {
+    Sqlite,
+    Report,
+}
+
+/// Opaque handle over an open, decrypted case DB connection + exclusive
+/// file lock. Dropping it (or calling [`Case::close`]) releases both.
+pub struct Case {
+    path: PathBuf,
+    case_id: Uuid,
+    name: String,
+    // Unread until M2 wires up entity/relationship CRUD against it.
+    #[allow(dead_code)]
+    conn: Connection,
+    _lock: File,
+}
+
+impl std::fmt::Debug for Case {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Case")
+            .field("path", &self.path)
+            .field("case_id", &self.case_id)
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Case {
+    /// Creates a fresh encrypted case at `<path>/<name>.eum`, generates and
+    /// stores its encryption key in the OS keychain, and applies the core
+    /// schema (SPEC.md §4.2).
+    pub fn create(path: &Path, name: &str) -> Result<Case, EngineError> {
+        fs::create_dir_all(path)?;
+        let case_path = path.join(format!("{name}.eum"));
+        if case_path.exists() {
+            return Err(EngineError::CaseAlreadyExists(case_path));
+        }
+
+        let case_id = Uuid::new_v4();
+        let hex_key = keystore::create_key(case_id)?;
+
+        match Self::init_case_file(&case_path, case_id, name, &hex_key) {
+            Ok(case) => Ok(case),
+            Err(err) => {
+                let _ = fs::remove_file(&case_path);
+                let _ = fs::remove_file(meta_path_for(&case_path));
+                let _ = keystore::delete_key(case_id);
+                Err(err)
+            }
+        }
+    }
+
+    fn init_case_file(
+        case_path: &Path,
+        case_id: Uuid,
+        name: &str,
+        hex_key: &str,
+    ) -> Result<Case, EngineError> {
+        let lock = lock_exclusive(case_path)?;
+
+        let mut conn = Connection::open(case_path)?;
+        apply_key(&conn, hex_key)?;
+
+        let now = now_unix_ms();
+        let tx = conn.transaction()?;
+        tx.execute_batch(SCHEMA_SQL)?;
+        {
+            let mut insert_meta =
+                tx.prepare("INSERT INTO case_meta (key, value) VALUES (?1, ?2)")?;
+            insert_meta.execute(params!["case_id", case_id.to_string()])?;
+            insert_meta.execute(params!["name", name])?;
+            insert_meta.execute(params!["schema_version", SCHEMA_VERSION])?;
+            insert_meta.execute(params!["created_at", now.to_string()])?;
+        }
+        tx.commit()?;
+
+        fs::write(meta_path_for(case_path), case_id.to_string())?;
+
+        Ok(Case {
+            path: case_path.to_path_buf(),
+            case_id,
+            name: name.to_string(),
+            conn,
+            _lock: lock,
+        })
+    }
+
+    /// Opens an existing case, acquiring an exclusive OS file lock for the
+    /// duration. A second attempt to open the same case file fails fast
+    /// with [`EngineError::CaseAlreadyOpen`] rather than risking
+    /// concurrent-write corruption.
+    pub fn open(path: &Path) -> Result<Case, EngineError> {
+        if !path.exists() {
+            return Err(EngineError::CaseNotFound(path.to_path_buf()));
+        }
+
+        let lock = lock_exclusive(path)?;
+
+        let case_id = read_case_id(path)?;
+        let hex_key = keystore::load_key(case_id)?;
+
+        let conn = Connection::open(path)?;
+        apply_key(&conn, &hex_key)?;
+        verify_decryption(&conn, path)?;
+
+        let name = conn.query_row(
+            "SELECT value FROM case_meta WHERE key = 'name'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        Ok(Case {
+            path: path.to_path_buf(),
+            case_id,
+            name,
+            conn,
+            _lock: lock,
+        })
+    }
+
+    /// Closes the case, releasing the file lock and the database
+    /// connection. Equivalent to dropping the `Case`; provided explicitly
+    /// so callers can observe close-time errors.
+    pub fn close(self) -> Result<(), EngineError> {
+        drop(self);
+        Ok(())
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.case_id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn export(&self, _dest: &Path, _format: ExportFormat) -> Result<(), EngineError> {
+        Err(EngineError::NotImplemented("Case::export"))
+    }
+
+    // --- Everything below is still a stub; lands in M2 (entity/relationship
+    // CRUD, merge/split) and M4 (scan orchestration). ---
+
+    pub fn add_entity(
+        &mut self,
+        _entity_type: EntityType,
+        _key: Option<String>,
+        _attrs: Vec<Attribute>,
+        _provenance: Provenance,
+    ) -> Result<EntityId, EngineError> {
+        Err(EngineError::NotImplemented("Case::add_entity"))
+    }
+
+    pub fn merge_entities(
+        &mut self,
+        _a: EntityId,
+        _b: EntityId,
+        _actor: Actor,
+    ) -> Result<EntityId, EngineError> {
+        Err(EngineError::NotImplemented("Case::merge_entities"))
+    }
+
+    pub fn split_entity(
+        &mut self,
+        _id: EntityId,
+        _fact_ids: Vec<FactId>,
+        _actor: Actor,
+    ) -> Result<EntityId, EngineError> {
+        Err(EngineError::NotImplemented("Case::split_entity"))
+    }
+
+    pub fn add_relationship(
+        &mut self,
+        _from: EntityId,
+        _to: EntityId,
+        _rel_type: RelationshipType,
+        _attrs: Vec<Attribute>,
+        _provenance: Provenance,
+    ) -> Result<RelationshipId, EngineError> {
+        Err(EngineError::NotImplemented("Case::add_relationship"))
+    }
+
+    pub fn list_entities(&self, _filter: EntityFilter) -> Result<Vec<Entity>, EngineError> {
+        Err(EngineError::NotImplemented("Case::list_entities"))
+    }
+
+    pub fn audit_trail(&self, _target: AuditTarget) -> Result<Vec<AuditEvent>, EngineError> {
+        Err(EngineError::NotImplemented("Case::audit_trail"))
+    }
+
+    pub fn start_scan(
+        &mut self,
+        _plugin: PluginRef,
+        _target: TargetEntity,
+        _config: ScanConfig,
+    ) -> Result<ScanId, EngineError> {
+        Err(EngineError::NotImplemented("Case::start_scan"))
+    }
+
+    pub fn resume_scan(&mut self, _scan_id: ScanId) -> Result<(), EngineError> {
+        Err(EngineError::NotImplemented("Case::resume_scan"))
+    }
+
+    pub fn scan_status(&self, _scan_id: ScanId) -> Result<ScanStatus, EngineError> {
+        Err(EngineError::NotImplemented("Case::scan_status"))
+    }
+}
+
+fn meta_path_for(case_path: &Path) -> PathBuf {
+    let mut os_string = case_path.as_os_str().to_owned();
+    os_string.push(".meta");
+    PathBuf::from(os_string)
+}
+
+fn read_case_id(case_path: &Path) -> Result<Uuid, EngineError> {
+    let meta_path = meta_path_for(case_path);
+    let raw = fs::read_to_string(&meta_path).map_err(|_| {
+        EngineError::CaseCorrupt(
+            case_path.to_path_buf(),
+            format!("missing sidecar metadata file {}", meta_path.display()),
+        )
+    })?;
+    Uuid::parse_str(raw.trim()).map_err(|_| {
+        EngineError::CaseCorrupt(
+            case_path.to_path_buf(),
+            "sidecar metadata file does not contain a valid case id".to_string(),
+        )
+    })
+}
+
+fn lock_exclusive(path: &Path) -> Result<File, EngineError> {
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.try_lock().map_err(|err| match err {
+        std::fs::TryLockError::WouldBlock => EngineError::CaseAlreadyOpen(path.to_path_buf()),
+        std::fs::TryLockError::Error(io_err) => EngineError::Io(io_err),
+    })?;
+    Ok(file)
+}
+
+fn apply_key(conn: &Connection, hex_key: &str) -> Result<(), EngineError> {
+    conn.execute_batch(&format!("PRAGMA key = \"x'{hex_key}'\";"))?;
+    Ok(())
+}
+
+/// Forces SQLCipher to actually touch the encrypted pages, so a wrong key
+/// or a corrupt/tampered file fails here with a specific, clear error
+/// (SPEC.md §5) instead of surfacing as a confusing failure on first real
+/// query.
+fn verify_decryption(conn: &Connection, path: &Path) -> Result<(), EngineError> {
+    match conn.query_row("SELECT count(*) FROM sqlite_master", [], |row| {
+        row.get::<_, i64>(0)
+    }) {
+        Ok(_) => Ok(()),
+        Err(rusqlite::Error::SqliteFailure(err, _)) if err.code == ErrorCode::NotADatabase => {
+            Err(EngineError::CaseCorrupt(
+                path.to_path_buf(),
+                "SQLCipher key was rejected, or the file is corrupt/tampered".to_string(),
+            ))
+        }
+        Err(e) => Err(EngineError::Sqlite(e)),
+    }
+}
+
+fn now_unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_millis()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Keeps the developer's real OS keychain clean across test runs; each
+    // test uses a fresh random case_id so this never collides between
+    // tests.
+    fn cleanup(case: &Case) {
+        let _ = keystore::delete_key(case.id());
+    }
+
+    #[test]
+    fn create_then_open_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let created = Case::create(dir.path(), "roundtrip").unwrap();
+        let case_id = created.id();
+        assert_eq!(created.name(), "roundtrip");
+        created.close().unwrap();
+
+        let opened = Case::open(&dir.path().join("roundtrip.eum")).unwrap();
+        assert_eq!(opened.id(), case_id);
+        assert_eq!(opened.name(), "roundtrip");
+        cleanup(&opened);
+    }
+
+    #[test]
+    fn create_refuses_to_overwrite_existing_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "dup").unwrap();
+        cleanup(&case);
+
+        let err = Case::create(dir.path(), "dup").unwrap_err();
+        assert!(matches!(err, EngineError::CaseAlreadyExists(_)));
+    }
+
+    #[test]
+    fn open_missing_case_is_a_clear_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = Case::open(&dir.path().join("nope.eum")).unwrap_err();
+        assert!(matches!(err, EngineError::CaseNotFound(_)));
+    }
+
+    #[test]
+    fn open_fails_fast_when_already_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "locked").unwrap();
+
+        let err = Case::open(case.path()).unwrap_err();
+        assert!(matches!(err, EngineError::CaseAlreadyOpen(_)));
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn tampered_case_file_is_detected_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "tampered").unwrap();
+        let path = case.path().to_path_buf();
+        let case_id = case.id();
+        case.close().unwrap();
+
+        // Flip the first page's bytes: SQLCipher's per-page HMAC must
+        // reject this rather than silently returning garbage rows.
+        let mut bytes = fs::read(&path).unwrap();
+        for byte in bytes.iter_mut().take(64) {
+            *byte ^= 0xFF;
+        }
+        fs::write(&path, bytes).unwrap();
+
+        let err = Case::open(&path).unwrap_err();
+        assert!(matches!(err, EngineError::CaseCorrupt(_, _)));
+
+        let _ = keystore::delete_key(case_id);
+    }
+
+    #[test]
+    fn plain_sqlite_open_without_key_cannot_read_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "encrypted").unwrap();
+        let path = case.path().to_path_buf();
+        cleanup(&case);
+        case.close().unwrap();
+
+        // No `PRAGMA key` applied here — this is what a plain `sqlite3`
+        // open of the case file looks like.
+        let conn = Connection::open(&path).unwrap();
+        let result = conn.query_row("SELECT count(*) FROM sqlite_master", [], |row| {
+            row.get::<_, i64>(0)
+        });
+        assert!(
+            result.is_err(),
+            "case file must be unreadable without the key"
+        );
+    }
+}
