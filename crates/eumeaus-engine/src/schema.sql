@@ -75,6 +75,18 @@ CREATE TABLE entity_attributes (
     value TEXT NOT NULL
 );
 
+-- Not in SPEC.md §4.2's table list, which only spells out entity_attributes
+-- — but §3.1's add_relationship takes `attrs` too, and §4.4's "attributes
+-- are never 'just there' without provenance" applies equally to
+-- relationships. Mirrors entity_attributes.
+CREATE TABLE relationship_attributes (
+    id TEXT PRIMARY KEY,
+    relationship_id TEXT NOT NULL REFERENCES relationships (id),
+    fact_id TEXT NOT NULL REFERENCES facts (id),
+    key TEXT NOT NULL,
+    value TEXT NOT NULL
+);
+
 -- Records merges, splits, and other structural edits; distinct from `facts`,
 -- which record collected data. Append-only.
 CREATE TABLE audit_events (

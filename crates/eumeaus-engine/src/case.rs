@@ -11,15 +11,14 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, ErrorCode};
 use uuid::Uuid;
 
 use crate::{
-    keystore, Actor, Attribute, AuditEvent, AuditTarget, EngineError, Entity, EntityFilter,
-    EntityId, EntityType, FactId, PluginRef, Provenance, RelationshipId, RelationshipType,
-    ScanConfig, ScanId, ScanStatus, TargetEntity,
+    crud, keystore, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, EngineError,
+    Entity, EntityFilter, EntityId, EntityType, FactId, PluginRef, Provenance, RelationshipId,
+    RelationshipType, ScanConfig, ScanId, ScanStatus, TargetEntity,
 };
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
@@ -36,8 +35,6 @@ pub struct Case {
     path: PathBuf,
     case_id: Uuid,
     name: String,
-    // Unread until M2 wires up entity/relationship CRUD against it.
-    #[allow(dead_code)]
     conn: Connection,
     _lock: File,
 }
@@ -88,7 +85,7 @@ impl Case {
         let mut conn = Connection::open(case_path)?;
         apply_key(&conn, hex_key)?;
 
-        let now = now_unix_ms();
+        let now = crate::now_unix_ms();
         let tx = conn.transaction()?;
         tx.execute_batch(SCHEMA_SQL)?;
         {
@@ -169,55 +166,69 @@ impl Case {
         Err(EngineError::NotImplemented("Case::export"))
     }
 
-    // --- Everything below is still a stub; lands in M2 (entity/relationship
-    // CRUD, merge/split) and M4 (scan orchestration). ---
-
     pub fn add_entity(
         &mut self,
-        _entity_type: EntityType,
-        _key: Option<String>,
-        _attrs: Vec<Attribute>,
-        _provenance: Provenance,
+        entity_type: EntityType,
+        key: Option<String>,
+        attrs: Vec<Attribute>,
+        provenance: Provenance,
     ) -> Result<EntityId, EngineError> {
-        Err(EngineError::NotImplemented("Case::add_entity"))
+        crud::add_entity(&mut self.conn, entity_type, key, attrs, provenance)
     }
 
     pub fn merge_entities(
         &mut self,
-        _a: EntityId,
-        _b: EntityId,
-        _actor: Actor,
+        a: EntityId,
+        b: EntityId,
+        actor: Actor,
     ) -> Result<EntityId, EngineError> {
-        Err(EngineError::NotImplemented("Case::merge_entities"))
+        crud::merge_entities(&mut self.conn, a, b, actor)
     }
 
     pub fn split_entity(
         &mut self,
-        _id: EntityId,
-        _fact_ids: Vec<FactId>,
-        _actor: Actor,
+        id: EntityId,
+        fact_ids: Vec<FactId>,
+        actor: Actor,
     ) -> Result<EntityId, EngineError> {
-        Err(EngineError::NotImplemented("Case::split_entity"))
+        crud::split_entity(&mut self.conn, id, fact_ids, actor)
     }
 
     pub fn add_relationship(
         &mut self,
-        _from: EntityId,
-        _to: EntityId,
-        _rel_type: RelationshipType,
-        _attrs: Vec<Attribute>,
-        _provenance: Provenance,
+        from: EntityId,
+        to: EntityId,
+        rel_type: RelationshipType,
+        attrs: Vec<Attribute>,
+        provenance: Provenance,
     ) -> Result<RelationshipId, EngineError> {
-        Err(EngineError::NotImplemented("Case::add_relationship"))
+        crud::add_relationship(&mut self.conn, from, to, rel_type, attrs, provenance)
     }
 
-    pub fn list_entities(&self, _filter: EntityFilter) -> Result<Vec<Entity>, EngineError> {
-        Err(EngineError::NotImplemented("Case::list_entities"))
+    pub fn list_entities(&self, filter: EntityFilter) -> Result<Vec<Entity>, EngineError> {
+        crud::list_entities(&self.conn, filter)
     }
 
-    pub fn audit_trail(&self, _target: AuditTarget) -> Result<Vec<AuditEvent>, EngineError> {
-        Err(EngineError::NotImplemented("Case::audit_trail"))
+    /// Not part of SPEC.md §3.1's illustrative API, but `entity show <id>`
+    /// (§3.4) needs a way to fetch a single entity by id.
+    pub fn get_entity(&self, id: EntityId) -> Result<Entity, EngineError> {
+        crud::get_entity(&self.conn, id)
     }
+
+    /// Also not in §3.1; backs `entity show`'s attribute listing.
+    pub fn list_attribute_records(
+        &self,
+        id: EntityId,
+    ) -> Result<Vec<AttributeRecord>, EngineError> {
+        crud::list_attribute_records(&self.conn, id)
+    }
+
+    pub fn audit_trail(&self, target: AuditTarget) -> Result<Vec<AuditEvent>, EngineError> {
+        crud::audit_trail(&self.conn, target)
+    }
+
+    // --- Everything below is still a stub; lands in M3 (plugin host) and
+    // M4 (scan orchestration). ---
 
     pub fn start_scan(
         &mut self,
@@ -274,7 +285,9 @@ fn lock_exclusive(path: &Path) -> Result<File, EngineError> {
 }
 
 fn apply_key(conn: &Connection, hex_key: &str) -> Result<(), EngineError> {
-    conn.execute_batch(&format!("PRAGMA key = \"x'{hex_key}'\";"))?;
+    conn.execute_batch(&format!(
+        "PRAGMA key = \"x'{hex_key}'\"; PRAGMA foreign_keys = ON;"
+    ))?;
     Ok(())
 }
 
@@ -295,13 +308,6 @@ fn verify_decryption(conn: &Connection, path: &Path) -> Result<(), EngineError> 
         }
         Err(e) => Err(EngineError::Sqlite(e)),
     }
-}
-
-fn now_unix_ms() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock before unix epoch")
-        .as_millis()
 }
 
 #[cfg(test)]

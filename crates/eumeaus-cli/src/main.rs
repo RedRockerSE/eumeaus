@@ -2,19 +2,20 @@
 //! `eumeaus-engine` API calls. This is also the end-to-end test surface for
 //! v1 (see `tests/e2e_case_lifecycle.rs`).
 //!
-//! STUB CRATE (milestone M0). Every subcommand either calls a still-stubbed
-//! engine method (surfacing `EngineError::NotImplemented`) or, for surface
-//! not yet backed by any crate (plugin/credential management, case/scan
-//! listing), prints its own "not yet implemented" message.
+//! Case lifecycle (M1) and entity/relationship CRUD, merge/split, and audit
+//! trail (M2) are wired to real engine calls. Plugin/scan/credential
+//! management (M3+) still print their own "not yet implemented" message.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::str::FromStr;
 
 use clap::{Parser, Subcommand};
 use eumeaus_engine::{
-    Attribute, Case, EngineError, EntityFilter, EntityType, ExportFormat, Provenance,
-    RelationshipType,
+    Actor, Attribute, AuditTarget, Case, EngineError, EntityFilter, EntityId, EntityType,
+    ExportFormat, FactId, Provenance, RelationshipId, RelationshipType, ScanId,
 };
+use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 enum CliError {
@@ -22,6 +23,10 @@ enum CliError {
     Engine(#[from] EngineError),
     #[error("not yet implemented: {0}")]
     NotImplemented(String),
+    #[error("invalid id {0:?}: {1}")]
+    InvalidId(String, uuid::Error),
+    #[error("specify exactly one of --entity, --relationship, --scan")]
+    AmbiguousAuditTarget,
 }
 
 #[derive(Parser)]
@@ -50,7 +55,13 @@ enum Commands {
     Scan(ScanCmd),
     #[command(subcommand)]
     Credential(CredentialCmd),
-    Audit {
+    #[command(subcommand)]
+    Audit(AuditCmd),
+}
+
+#[derive(Subcommand)]
+enum AuditCmd {
+    Show {
         #[arg(long)]
         entity: Option<String>,
         #[arg(long)]
@@ -176,37 +187,6 @@ fn not_implemented(op: &str) -> Result<(), CliError> {
     Err(CliError::NotImplemented(op.to_string()))
 }
 
-fn parse_entity_type(s: &str) -> EntityType {
-    match s {
-        "Person" => EntityType::Person,
-        "Username" => EntityType::Username,
-        "Email" => EntityType::Email,
-        "PhoneNumber" => EntityType::PhoneNumber,
-        "Domain" => EntityType::Domain,
-        "IPAddress" => EntityType::IpAddress,
-        "OnlineAccount" => EntityType::OnlineAccount,
-        "Organization" => EntityType::Organization,
-        "Location" => EntityType::Location,
-        "Document" => EntityType::Document,
-        "Image" => EntityType::Image,
-        "Vehicle" => EntityType::Vehicle,
-        other => EntityType::Custom(other.to_string()),
-    }
-}
-
-fn parse_relationship_type(s: &str) -> RelationshipType {
-    match s {
-        "HasAccount" => RelationshipType::HasAccount,
-        "Owns" => RelationshipType::Owns,
-        "AssociatedWith" => RelationshipType::AssociatedWith,
-        "LocatedAt" => RelationshipType::LocatedAt,
-        "MemberOf" => RelationshipType::MemberOf,
-        "ResolvesTo" => RelationshipType::ResolvesTo,
-        "Mentions" => RelationshipType::Mentions,
-        _ => RelationshipType::RelatedTo,
-    }
-}
-
 fn parse_attrs(raw: &[String]) -> Vec<Attribute> {
     raw.iter()
         .filter_map(|kv| kv.split_once('='))
@@ -217,13 +197,49 @@ fn parse_attrs(raw: &[String]) -> Vec<Attribute> {
         .collect()
 }
 
+fn parse_uuid(raw: &str) -> Result<Uuid, CliError> {
+    Uuid::parse_str(raw).map_err(|e| CliError::InvalidId(raw.to_string(), e))
+}
+
+fn parse_entity_id(raw: &str) -> Result<EntityId, CliError> {
+    Ok(EntityId(parse_uuid(raw)?))
+}
+
+fn parse_relationship_id(raw: &str) -> Result<RelationshipId, CliError> {
+    Ok(RelationshipId(parse_uuid(raw)?))
+}
+
+fn parse_fact_ids(raw: &str) -> Result<Vec<FactId>, CliError> {
+    raw.split(',')
+        .map(str::trim)
+        .map(|id| parse_uuid(id).map(FactId))
+        .collect()
+}
+
+fn now_unix_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_millis() as i64
+}
+
 fn manual_provenance() -> Provenance {
     Provenance {
         source: "user".to_string(),
+        source_version: env!("CARGO_PKG_VERSION").to_string(),
         source_url: None,
         retrieval_method: None,
         raw_response_sha256: None,
-        collected_at_unix_ms: 0,
+        collected_at_unix_ms: now_unix_ms(),
+    }
+}
+
+/// No identity/auth system yet (SPEC.md doesn't specify one for v1's CLI),
+/// so every manual edit is attributed to this fixed actor.
+fn default_actor() -> Actor {
+    Actor {
+        name: "user".to_string(),
     }
 }
 
@@ -259,41 +275,100 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 attrs,
             } => {
                 let mut case = require_case(&cli.case)?;
-                case.add_entity(
-                    parse_entity_type(&entity_type),
+                let id = case.add_entity(
+                    EntityType::from_str(&entity_type).expect("EntityType::from_str is infallible"),
                     key,
                     parse_attrs(&attrs),
                     manual_provenance(),
-                )
-                .map(|_| ())
-                .map_err(CliError::from)
+                )?;
+                println!("{id}");
+                Ok(())
             }
             EntityCmd::List { entity_type, .. } => {
                 let case = require_case(&cli.case)?;
-                case.list_entities(EntityFilter {
-                    entity_type: entity_type.map(|t| parse_entity_type(&t)),
-                })
-                .map(|_| ())
-                .map_err(CliError::from)
+                let entities = case.list_entities(EntityFilter {
+                    entity_type: entity_type.map(|t| EntityType::from_str(&t).expect("infallible")),
+                })?;
+                for entity in entities {
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        entity.id,
+                        entity.entity_type,
+                        entity.canonical_key.as_deref().unwrap_or("-"),
+                        entity.display_label,
+                    );
+                }
+                Ok(())
             }
-            EntityCmd::Show { .. } => not_implemented("entity show"),
-            EntityCmd::Merge { .. } => not_implemented("entity merge"),
-            EntityCmd::Split { .. } => not_implemented("entity split"),
+            EntityCmd::Show { id } => {
+                let case = require_case(&cli.case)?;
+                let entity_id = parse_entity_id(&id)?;
+                let entity = case.get_entity(entity_id)?;
+                println!("id:            {}", entity.id);
+                println!("type:          {}", entity.entity_type);
+                println!(
+                    "canonical_key: {}",
+                    entity.canonical_key.as_deref().unwrap_or("-")
+                );
+                println!("label:         {}", entity.display_label);
+
+                let attrs = case.list_attribute_records(entity_id)?;
+                if attrs.is_empty() {
+                    println!("attributes:    (none)");
+                } else {
+                    println!("attributes:");
+                    for a in attrs {
+                        let flag = match (a.is_current, a.conflicting) {
+                            (true, true) => "* (conflict, other values exist)",
+                            (true, false) => "*",
+                            (false, _) => " ",
+                        };
+                        println!(
+                            "  {flag} {} = {} (source: {}, collected_at: {})",
+                            a.key, a.value, a.source, a.collected_at_unix_ms
+                        );
+                    }
+                }
+                Ok(())
+            }
+            EntityCmd::Merge { id1, id2 } => {
+                let mut case = require_case(&cli.case)?;
+                let survivor = case.merge_entities(
+                    parse_entity_id(&id1)?,
+                    parse_entity_id(&id2)?,
+                    default_actor(),
+                )?;
+                println!("{survivor}");
+                Ok(())
+            }
+            EntityCmd::Split { id, facts } => {
+                let mut case = require_case(&cli.case)?;
+                let new_id = case.split_entity(
+                    parse_entity_id(&id)?,
+                    parse_fact_ids(&facts)?,
+                    default_actor(),
+                )?;
+                println!("{new_id}");
+                Ok(())
+            }
         },
         Commands::Relationship(cmd) => match cmd {
             RelationshipCmd::Add {
-                rel_type, attrs, ..
+                from,
+                to,
+                rel_type,
+                attrs,
             } => {
                 let mut case = require_case(&cli.case)?;
-                case.add_relationship(
-                    eumeaus_engine::EntityId(uuid::Uuid::nil()),
-                    eumeaus_engine::EntityId(uuid::Uuid::nil()),
-                    parse_relationship_type(&rel_type),
+                let id = case.add_relationship(
+                    parse_entity_id(&from)?,
+                    parse_entity_id(&to)?,
+                    RelationshipType::from_str(&rel_type).expect("infallible"),
                     parse_attrs(&attrs),
                     manual_provenance(),
-                )
-                .map(|_| ())
-                .map_err(CliError::from)
+                )?;
+                println!("{id}");
+                Ok(())
             }
         },
         Commands::Plugin(cmd) => match cmd {
@@ -325,7 +400,30 @@ fn run(cli: Cli) -> Result<(), CliError> {
             CredentialCmd::List => not_implemented("credential list"),
             CredentialCmd::Remove { .. } => not_implemented("credential remove"),
         },
-        Commands::Audit { .. } => not_implemented("audit show"),
+        Commands::Audit(AuditCmd::Show {
+            entity,
+            relationship,
+            scan,
+        }) => {
+            let case = require_case(&cli.case)?;
+            let target = match (entity, relationship, scan) {
+                (Some(id), None, None) => AuditTarget::Entity(parse_entity_id(&id)?),
+                (None, Some(id), None) => AuditTarget::Relationship(parse_relationship_id(&id)?),
+                (None, None, Some(id)) => AuditTarget::Scan(ScanId(parse_uuid(&id)?)),
+                _ => return Err(CliError::AmbiguousAuditTarget),
+            };
+            for event in case.audit_trail(target)? {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    event.occurred_at_unix_ms,
+                    event.event_type,
+                    event.actor,
+                    event.id,
+                    event.description
+                );
+            }
+            Ok(())
+        }
     }
 }
 

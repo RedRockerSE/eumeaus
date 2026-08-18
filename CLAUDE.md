@@ -38,8 +38,20 @@ before merge.
   files reference them via `foo.workspace = true`, not their own versions.
 - Facts (`facts` table) are append-only — never updated or deleted. Corrections
   are new fact rows; merges/splits get an explicit `audit_events` row.
-- Entity auto-merge is exact `(entity_type, canonical_key)` match only. Never
-  auto-merge on fuzzy similarity — that's a manual `entity merge` action.
+- Entity auto-merge is exact `(entity_type, canonical_key)` match only (case-
+  insensitive, trimmed). Never auto-merge on fuzzy similarity — that's a
+  manual `entity merge` action.
+- CRUD/merge/split SQL lives in `eumeaus-engine/src/crud.rs` as free
+  functions over `&Connection`/`&mut Connection`, not `Case` methods
+  directly — `Case` (`case.rs`) just delegates. Keeps lifecycle and data
+  logic separate, and lets `crud.rs`'s own tests run against a plain
+  `Connection::open_in_memory()` with schema applied, no SQLCipher/keychain
+  needed.
+- A merge re-points the loser's facts/attributes/relationship endpoints at
+  the survivor and deletes its entity row; a split does the reverse for a
+  chosen set of facts. Either way the *facts' own data* (source, provenance,
+  confidence) is never touched — only which entity currently owns them —
+  and both are recorded as `audit_events` rows, never mutating a fact.
 - Credentials are never passed via subprocess argv or env vars (visible to
   other processes) — injected into the gRPC request body by the plugin host.
 - `.eum` case files are SQLCipher-encrypted SQLite; opening one takes an
@@ -58,11 +70,16 @@ before merge.
 
 ## Current status
 
-M0 (workspace scaffolding) and M1 (case lifecycle & encrypted persistence)
-are done: `Case::create`/`open`/`close` work over real SQLCipher, with
-OS-keychain key storage and an exclusive file lock. Entity/relationship
-CRUD, merge/split, and scan orchestration (M2+) are still stubs returning
+M0–M2 are done: case lifecycle over real SQLCipher (M1), plus entity/
+relationship CRUD, merge/split, and audit trail (M2), all wired through the
+CLI. Plugin host and scan orchestration (M3+) are still stubs returning
 `EngineError::NotImplemented` — see SPEC.md §7 for the milestone order.
+
+Two things extend SPEC.md §3.1's illustrative engine API rather than
+implementing it verbatim: `Case::get_entity`/`list_attribute_records` (no
+signature given there, but `entity show <id>` needs them), and
+`RelationshipType::Custom` plus a `relationship_attributes` table (§4.2
+only lists `entity_attributes`, but `add_relationship` takes `attrs` too).
 
 ## Gotchas
 

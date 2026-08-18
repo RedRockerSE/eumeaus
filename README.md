@@ -3,11 +3,10 @@
 A local-first, plugin-extensible OSINT case management tool for investigators.
 See [`SPEC.md`](./SPEC.md) for the full design.
 
-**Status:** M0 (scaffolding) and M1 (case lifecycle & encrypted persistence)
-done. `Case::create`/`open`/`close` work over real SQLCipher with OS-keychain
-key storage. Everything else (entity/relationship CRUD, plugins, scans) is
-still a stub returning `NotImplemented` — see `SPEC.md` §7 for the milestone
-order.
+**Status:** M0–M2 done. Case lifecycle over real SQLCipher (M1), plus manual
+entity/relationship CRUD, merge/split, and audit trail via the CLI (M2).
+Plugins and scans are still stubs returning `NotImplemented` — see
+`SPEC.md` §7 for the milestone order.
 
 ## Workspace layout
 
