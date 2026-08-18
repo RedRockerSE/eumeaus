@@ -62,6 +62,19 @@ before merge.
   fixture), or scan resumability internals: load the `plugin-development`
   skill first — subprocess/gRPC/async gotchas, signing, and the
   test-fixture-as-Cargo-example pattern all live there, not here.
+- Credentials (`eumeaus-plugin-host/src/credentials.rs`) live in a
+  *separate* OS-keychain service (`"eumeaus-credentials"`) from case
+  encryption keys (`"eumeaus"`, in `keystore.rs`), and are global to the OS
+  user account, not scoped to a case — `credential set/list/remove` take
+  no `--case`. Injected into a plugin's `CheckRequest.resolved_credentials`
+  by `resolve_credentials`, resolved synchronously *before* entering the
+  scan's tokio runtime (same reason as the async `check()` gotcha in the
+  `plugin-development` skill). A missing credential a plugin declared
+  needing marks just that plugin's run `ERROR`, not the whole scan.
+- `credential set`'s interactive prompt (`rpassword`) needs a real TTY —
+  it refuses to read a plain pipe on purpose. Not reproducible in a
+  headless/CI test without a pty-emulation dependency; the underlying
+  store and injection are tested directly instead (`eumeaus-engine/src/scan.rs`).
 - `.eum` case files are SQLCipher-encrypted SQLite; opening one takes an
   exclusive OS file lock (`Case::open`/`create`/`close` are implemented, M1).
   The key lives in the OS keychain under service `"eumeaus"`, entry =
@@ -78,16 +91,18 @@ before merge.
 
 ## Current status
 
-M0–M5 are done — the full v1 proof (SPEC.md §6) passes
-(`eumeaus-cli/tests/e2e_v1_proof.rs`): case lifecycle over real SQLCipher
-(M1); entity/relationship CRUD, merge/split, and audit trail via the CLI
-(M2); plugin manifest discovery, semver/signature validation, and real
-subprocess+gRPC-over-UDS spawn/handshake/invoke/timeout (M3); scan
-orchestration — worker pool, rate limiting, crash-safe resumability, result
-auto-merge — wired end to end through `scan run`/`status`/`resume` (M4);
-and a real Sherlock-equivalent PoC plugin, signed, checking real sites over
-real HTTP (M5). The credential store is still NotImplemented — see SPEC.md
-§7 for the milestone order.
+All of SPEC.md §7's milestones (M0–M6) are done — v1 is complete. Case
+lifecycle over real SQLCipher (M1); entity/relationship CRUD, merge/split,
+and audit trail via the CLI (M2); plugin manifest discovery,
+semver/signature validation, and real subprocess+gRPC-over-UDS
+spawn/handshake/invoke/timeout (M3); scan orchestration — worker pool, rate
+limiting, crash-safe resumability, result auto-merge (M4); a real
+Sherlock-equivalent PoC plugin, signed, checking real sites over real HTTP,
+with the full v1 proof (SPEC.md §6) passing
+(`eumeaus-cli/tests/e2e_v1_proof.rs`, M5); and OS-keychain-backed
+credential storage, injected into a plugin's request body only — never the
+case file, subprocess argv, or environment (M6). SPEC.md §8's open
+questions are still open; nothing beyond v1 scope has started.
 
 Deviations from SPEC.md's illustrative APIs, each with a reason documented
 at the point of deviation: `Case::get_entity`/`list_attribute_records`/

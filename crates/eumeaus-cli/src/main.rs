@@ -33,6 +33,8 @@ enum CliError {
     UnknownScanTarget(String, String),
     #[error("invalid --trusted-key: {0}")]
     InvalidTrustedKey(String),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 #[derive(Parser)]
@@ -483,9 +485,21 @@ fn run(cli: Cli) -> Result<(), CliError> {
             ScanCmd::List => not_implemented("scan list"),
         },
         Commands::Credential(cmd) => match cmd {
-            CredentialCmd::Set { .. } => not_implemented("credential set"),
-            CredentialCmd::List => not_implemented("credential list"),
-            CredentialCmd::Remove { .. } => not_implemented("credential remove"),
+            CredentialCmd::Set { name } => {
+                let value = rpassword::prompt_password(format!("Value for credential {name:?}: "))?;
+                eumeaus_engine::credentials::set(&name, &value).map_err(EngineError::from)?;
+                Ok(())
+            }
+            CredentialCmd::List => {
+                for name in eumeaus_engine::credentials::list().map_err(EngineError::from)? {
+                    println!("{name}");
+                }
+                Ok(())
+            }
+            CredentialCmd::Remove { name } => {
+                eumeaus_engine::credentials::remove(&name).map_err(EngineError::from)?;
+                Ok(())
+            }
         },
         Commands::Audit(AuditCmd::Show {
             entity,

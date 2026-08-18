@@ -11,6 +11,11 @@
 //! machine has no Windows target to develop or test that against, so it's
 //! left as a documented gap rather than guessed at.
 
+/// `credential set/list/remove` (SPEC.md §3.4) plus [`credentials::resolve_credentials`],
+/// which a scan uses to inject a plugin's requested credentials into its
+/// `CheckRequest` — see the module doc for why credentials never touch
+/// the case file, subprocess argv, or environment variables.
+pub mod credentials;
 mod host;
 mod manifest;
 mod signature;
@@ -57,4 +62,10 @@ pub enum PluginError {
     Transport(#[from] tonic::transport::Error),
     #[error("grpc error: {0}")]
     Grpc(#[from] Box<tonic::Status>),
+    #[error("credential store error: {0}")]
+    Credential(String),
+    #[error(
+        "plugin {1} requires credential {0:?}, which is not set (use `eumeaus credential set {0}`)"
+    )]
+    MissingCredential(String, String),
 }

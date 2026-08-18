@@ -3,16 +3,18 @@
 A local-first, plugin-extensible OSINT case management tool for investigators.
 See [`SPEC.md`](./SPEC.md) for the full design.
 
-**Status:** M0–M5 done — the full v1 proof (`SPEC.md` §6) passes. Case
-lifecycle over real SQLCipher (M1); manual entity/relationship CRUD,
-merge/split, and audit trail via the CLI (M2); plugin manifest validation
-and real subprocess/gRPC spawn, handshake, invoke, and timeout handling
-(M3); scan orchestration — worker pool, rate limiting, crash-safe
-resumability, result auto-merge — wired end to end through `scan
-run`/`status`/`resume` (M4); and a real Sherlock-equivalent proof-of-concept
-plugin (`eumeaus-username-search-plugin`), signed, checking real sites over
-real HTTP (M5). Credentials are still a stub returning `NotImplemented` —
-see `SPEC.md` §7 for the milestone order.
+**Status:** v1 complete — all of `SPEC.md` §7's milestones (M0–M6) are
+done, including the full v1 proof (`SPEC.md` §6). Case lifecycle over real
+SQLCipher (M1); manual entity/relationship CRUD, merge/split, and audit
+trail via the CLI (M2); plugin manifest validation and real subprocess/gRPC
+spawn, handshake, invoke, and timeout handling (M3); scan orchestration —
+worker pool, rate limiting, crash-safe resumability, result auto-merge —
+wired end to end through `scan run`/`status`/`resume` (M4); a real
+Sherlock-equivalent proof-of-concept plugin
+(`eumeaus-username-search-plugin`), signed, checking real sites over real
+HTTP (M5); and OS-keychain-backed credential storage, injected into a
+plugin's request only — never the case file, subprocess argv, or
+environment (M6).
 
 ## Workspace layout
 

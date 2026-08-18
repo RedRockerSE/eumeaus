@@ -329,6 +329,14 @@ struct PluginOutcome {
 /// connection in the same instant). Every `scan_plugin_runs` transition
 /// and every successful result's ingestion happens synchronously in this
 /// task, between `.await` points, never inside a spawned one.
+///
+/// Each plugin's requested credentials (SPEC.md §4.5) are resolved here,
+/// synchronously, *before* the tokio runtime below is entered —
+/// `keyring`'s Secret Service backend does its own internal async D-Bus
+/// work, which must never run nested inside an already-running runtime
+/// (see the `plugin-development` skill). A plugin whose credentials can't
+/// be resolved is marked `ERROR` immediately and excluded from the run,
+/// rather than aborting the whole scan (SPEC.md §5).
 fn run_to_completion(
     conn: &mut Connection,
     scan_id: Uuid,
@@ -338,12 +346,27 @@ fn run_to_completion(
     rate_limit_per_sec: Option<u32>,
     trust_policy: TrustPolicy,
 ) -> Result<(), EngineError> {
+    let mut runnable = Vec::with_capacity(manifests.len());
+    for manifest in manifests {
+        match eumeaus_plugin_host::credentials::resolve_credentials(&manifest) {
+            Ok(resolved) => runnable.push((manifest, resolved)),
+            Err(e) => set_run_status(
+                conn,
+                scan_id,
+                &manifest.plugin.name,
+                "ERROR",
+                Some(now_unix_ms()),
+                Some(&e.to_string()),
+            )?,
+        }
+    }
+
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_to_completion_async(
         conn,
         scan_id,
         target_entity,
-        manifests,
+        runnable,
         worker_pool as usize,
         rate_limit_per_sec,
         trust_policy,
@@ -354,7 +377,7 @@ async fn run_to_completion_async(
     conn: &mut Connection,
     scan_id: Uuid,
     target_entity: &Entity,
-    manifests: Vec<PluginManifest>,
+    runnable: Vec<(PluginManifest, HashMap<String, String>)>,
     worker_pool: usize,
     rate_limit_per_sec: Option<u32>,
     trust_policy: TrustPolicy,
@@ -365,17 +388,17 @@ async fn run_to_completion_async(
     let mut last_dispatch: Option<Instant> = None;
 
     let mut join_set: JoinSet<PluginOutcome> = JoinSet::new();
-    let mut pending = manifests.into_iter();
+    let mut pending = runnable.into_iter();
 
     let mut dispatch_next = |conn: &mut Connection,
                              join_set: &mut JoinSet<PluginOutcome>,
                              last_dispatch: &mut Option<Instant>|
      -> Result<bool, EngineError> {
-        let Some(manifest) = pending.next() else {
+        let Some((manifest, credentials)) = pending.next() else {
             return Ok(false);
         };
         set_run_status(conn, scan_id, &manifest.plugin.name, "RUNNING", None, None)?;
-        let request = build_check_request(scan_id, target_entity, &manifest);
+        let request = build_check_request(scan_id, target_entity, &manifest, credentials);
         *last_dispatch = Some(Instant::now());
         dispatch(join_set, manifest, request, trust_policy.clone());
         Ok(true)
@@ -417,6 +440,7 @@ fn build_check_request(
     scan_id: Uuid,
     target_entity: &Entity,
     manifest: &PluginManifest,
+    resolved_credentials: HashMap<String, String>,
 ) -> CheckRequest {
     CheckRequest {
         scan_id: scan_id.to_string(),
@@ -425,7 +449,7 @@ fn build_check_request(
             .canonical_key
             .clone()
             .unwrap_or_else(|| target_entity.display_label.clone()),
-        resolved_credentials: HashMap::new(),
+        resolved_credentials,
         rate_limit: Some(RateLimitConfig {
             requests_per_sec: manifest.execution.default_rate_limit_per_sec,
             timeout_ms: manifest.execution.default_timeout_ms as u32,
@@ -743,6 +767,57 @@ default_timeout_ms = {default_timeout_ms}
         std::fs::write(plugin_dir.join("plugin.toml"), toml).unwrap();
     }
 
+    /// Same as [`write_manifest`], but declaring `requested_credentials`
+    /// (SPEC.md §4.5/§7 M6) — separate function rather than adding a
+    /// parameter to `write_manifest` so its 7 existing, already-passing
+    /// call sites don't need touching for a case only two new tests need.
+    fn write_manifest_with_credentials(
+        plugins_dir: &Path,
+        plugin_name: &str,
+        binary_example_name: &str,
+        default_timeout_ms: u64,
+        requested_credentials: &[&str],
+    ) {
+        let plugin_dir = plugins_dir.join(plugin_name);
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        let entrypoint = example_binary_path(binary_example_name);
+        let credentials_toml = requested_credentials
+            .iter()
+            .map(|c| format!("{c:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let toml = format!(
+            r#"
+[plugin]
+name = "{plugin_name}"
+version = "0.1.0"
+description = "test fixture"
+author = "test"
+
+[compatibility]
+engine_min = "0.1.0"
+engine_max = "0.x"
+protocol_version = "1"
+
+[contract]
+input_entity_types = ["Username"]
+output_entity_types = ["OnlineAccount"]
+output_relationship_types = ["HasAccount"]
+
+[permissions]
+network = false
+requested_credentials = [{credentials_toml}]
+
+[execution]
+entrypoint = "{entrypoint}"
+default_rate_limit_per_sec = 100
+default_timeout_ms = {default_timeout_ms}
+"#,
+            entrypoint = entrypoint.display(),
+        );
+        std::fs::write(plugin_dir.join("plugin.toml"), toml).unwrap();
+    }
+
     fn new_case_with_target(dir: &Path, case_name: &str) -> (Case, EntityId) {
         let mut case = Case::create(dir, case_name).unwrap();
         let id = case
@@ -1011,6 +1086,100 @@ default_timeout_ms = {default_timeout_ms}
             run_status(case.conn_mut(), scan_id.0, "scan-hang"),
             "TIMEOUT"
         );
+        assert_eq!(run_status(case.conn_mut(), scan_id.0, "scan-ok"), "SUCCESS");
+
+        keystore::delete_key(case.id()).ok();
+    }
+
+    /// SPEC.md §7 M6's verify criterion, directly: a plugin declaring
+    /// `requested_credentials` receives the right value in
+    /// `CheckRequest.resolved_credentials`, and that value never shows up
+    /// in the plugin subprocess's own argv or environment, nor in the raw
+    /// case file bytes.
+    #[test]
+    fn credential_is_injected_and_never_leaks_via_argv_env_or_case_file() {
+        let base = tempfile::tempdir().unwrap();
+        let plugins_dir = base.path().join("plugins");
+        write_manifest_with_credentials(
+            &plugins_dir,
+            "cred-echo",
+            "cred_echo",
+            2000,
+            &["test_credential"],
+        );
+
+        let secret_value = "super-secret-value-12345";
+        eumeaus_plugin_host::credentials::set("test_credential", secret_value).unwrap();
+
+        let (mut case, target_id) = new_case_with_target(&base.path().join("case"), "cred-test");
+        let scan_id = case
+            .start_scan(
+                &plugins_dir,
+                vec![],
+                TargetEntity { id: target_id },
+                ScanConfig::default(),
+                TrustPolicy::AllowUnsigned,
+            )
+            .unwrap();
+
+        assert_eq!(case.scan_status(scan_id).unwrap(), ScanStatus::Completed);
+
+        let entities = case
+            .list_entities(EntityFilter {
+                entity_type: Some(EntityType::OnlineAccount),
+            })
+            .unwrap();
+        assert_eq!(entities.len(), 1);
+        let attrs = case.list_attribute_records(entities[0].id).unwrap();
+        let get = |key: &str| attrs.iter().find(|a| a.key == key).map(|a| a.value.clone());
+
+        assert_eq!(get("received_credential"), Some(secret_value.to_string()));
+        assert_eq!(get("leaked_via_argv"), Some("false".to_string()));
+        assert_eq!(get("leaked_via_env"), Some("false".to_string()));
+
+        // Belt and suspenders on top of the SQLCipher guarantee (M1): the
+        // raw case file bytes shouldn't contain the plaintext secret
+        // either, encrypted or not.
+        let raw = std::fs::read(case.path()).unwrap();
+        assert!(
+            !raw.windows(secret_value.len())
+                .any(|w| w == secret_value.as_bytes()),
+            "the credential value must never appear in the raw case file bytes"
+        );
+
+        eumeaus_plugin_host::credentials::remove("test_credential").unwrap();
+        keystore::delete_key(case.id()).ok();
+    }
+
+    #[test]
+    fn missing_credential_errors_that_one_plugin_run_not_the_whole_scan() {
+        let base = tempfile::tempdir().unwrap();
+        let plugins_dir = base.path().join("plugins");
+        write_manifest_with_credentials(
+            &plugins_dir,
+            "cred-echo",
+            "cred_echo",
+            2000,
+            &["a_credential_nobody_set"],
+        );
+        write_manifest(&plugins_dir, "scan-ok", "scan_ok", 2000);
+
+        let (mut case, target_id) = new_case_with_target(&base.path().join("case"), "missing-cred");
+        let scan_id = case
+            .start_scan(
+                &plugins_dir,
+                vec![],
+                TargetEntity { id: target_id },
+                ScanConfig::default(),
+                TrustPolicy::AllowUnsigned,
+            )
+            .unwrap();
+
+        assert_eq!(
+            case.scan_status(scan_id).unwrap(),
+            ScanStatus::PartiallyFailed
+        );
+        assert_eq!(run_status(case.conn_mut(), scan_id.0, "cred-echo"), "ERROR");
         assert_eq!(run_status(case.conn_mut(), scan_id.0, "scan-ok"), "SUCCESS");
 
         keystore::delete_key(case.id()).ok();

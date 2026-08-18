@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use case::{Case, ExportFormat};
+pub use eumeaus_plugin_host::credentials;
 pub use eumeaus_plugin_host::TrustPolicy;
 
 #[derive(Debug, thiserror::Error)]
