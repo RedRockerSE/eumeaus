@@ -26,5 +26,23 @@ uuid = { version = "1.10.0", features = ["v4", "serde"] }
 serde = { version = "1.0.210", features = ["derive"] }
 clap = { version = "4.5.20", features = ["derive"] }
 
+# M3: plugin protocol/host (gRPC over a local Unix domain socket, per
+# SPEC.md §2.2/§3.2, modeled on HashiCorp go-plugin).
+tonic = "0.12.3"
+prost = "0.13.5"
+tokio = "1.53.1"
+tokio-stream = "0.1.19"
+# Pinned to the exact version tonic 0.12.3 itself depends on (^0.4.7) so
+# only one `tower` version resolves — a direct 0.5.x pin would deadlock
+# trait resolution against tonic's `Service`/`service_fn` types.
+tower = "0.4.7"
+hyper-util = "0.1.20"
+toml = "1.1.4"
+semver = "1.0.28"
+sha2 = "0.10.9"
+base64 = "0.23.1"
+ed25519-dalek = "2.1.1"
+async-trait = "0.1.92"
+
 [profile.dev]
 debug = 1

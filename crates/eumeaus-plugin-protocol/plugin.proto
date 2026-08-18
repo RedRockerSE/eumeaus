@@ -5,10 +5,9 @@ package eumeaus.plugin.v1;
 // Wire contract between eumeaus-engine (via eumeaus-plugin-host) and plugin
 // subprocesses. Single source of truth both sides compile against.
 //
-// NOT YET WIRED TO CODEGEN. Milestone M3 adds a build.rs (tonic-build /
-// prost-build) that compiles this file into crates/eumeaus-plugin-protocol/src.
-// Until then this file documents the contract; eumeaus-plugin-protocol::stub
-// holds hand-written placeholder types with the same shape.
+// Compiled by build.rs (tonic-build, via a vendored protoc so no system
+// install is required) into $OUT_DIR, then pulled in by
+// `tonic::include_proto!("eumeaus.plugin.v1")` in src/lib.rs.
 
 service PluginRuntime {
   rpc Describe(DescribeRequest) returns (DescribeResponse);

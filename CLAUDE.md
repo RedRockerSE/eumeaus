@@ -54,6 +54,25 @@ before merge.
   and both are recorded as `audit_events` rows, never mutating a fact.
 - Credentials are never passed via subprocess argv or env vars (visible to
   other processes) — injected into the gRPC request body by the plugin host.
+- Plugin subprocess/gRPC wiring uses the tonic 0.12.x line (not latest —
+  0.13+ split prost codegen into a separate `tonic-prost-build` crate with a
+  less-established API; 0.12.x's classic `tonic_build::compile_protos` is
+  better documented and lower-risk). `tower` is pinned to exactly what
+  tonic 0.12 depends on (`0.4.7`) — bumping it alone would leave two
+  incompatible `tower` majors in the graph.
+- `eumeaus-plugin-host`'s public API (`load`/`invoke`/`shutdown`) is async,
+  unlike SPEC.md §3.1's sync illustrative signature — gRPC subprocess I/O is
+  inherently async, and how the (currently fully sync) engine bridges into
+  it is an M4 "scan orchestration" decision, not this crate's to make yet.
+- `PluginHost::discover`/`load`/`invoke`/`shutdown`'s test fixtures
+  (`eumeaus-plugin-host/examples/stub_{echo,hang}.rs`) are Cargo *examples*,
+  not `[[bin]]` targets — a same-package `[[bin]]` needing a dev-dependency
+  (they depend on `eumeaus-plugin-sdk`) breaks plain `cargo build`, since
+  dev-deps aren't linked for `[[bin]]`s outside `cargo test`. Examples are
+  exempt from plain `cargo build` and still get dev-deps under `cargo test`.
+  There's no `CARGO_BIN_EXE_`-style env var for examples, so
+  `tests/host.rs` locates the compiled one relative to its own
+  `current_exe()` instead.
 - `.eum` case files are SQLCipher-encrypted SQLite; opening one takes an
   exclusive OS file lock (`Case::open`/`create`/`close` are implemented, M1).
   The key lives in the OS keychain under service `"eumeaus"`, entry =
@@ -70,16 +89,21 @@ before merge.
 
 ## Current status
 
-M0–M2 are done: case lifecycle over real SQLCipher (M1), plus entity/
-relationship CRUD, merge/split, and audit trail (M2), all wired through the
-CLI. Plugin host and scan orchestration (M3+) are still stubs returning
-`EngineError::NotImplemented` — see SPEC.md §7 for the milestone order.
+M0–M3 are done: case lifecycle over real SQLCipher (M1); entity/relationship
+CRUD, merge/split, and audit trail via the CLI (M2); plugin manifest
+discovery, semver/signature validation, and real subprocess+gRPC-over-UDS
+spawn/handshake/invoke/timeout in `eumeaus-plugin-host` (M3, not yet wired
+into the CLI or engine — that's M4's "scan orchestration"). Scan
+orchestration and the credential store are still stubs returning
+`NotImplemented` — see SPEC.md §7 for the milestone order.
 
-Two things extend SPEC.md §3.1's illustrative engine API rather than
-implementing it verbatim: `Case::get_entity`/`list_attribute_records` (no
-signature given there, but `entity show <id>` needs them), and
+Deviations from SPEC.md's illustrative APIs, each with a reason documented
+at the point of deviation: `Case::get_entity`/`list_attribute_records`
+(§3.1 gives no signature, but `entity show <id>` needs them);
 `RelationshipType::Custom` plus a `relationship_attributes` table (§4.2
-only lists `entity_attributes`, but `add_relationship` takes `attrs` too).
+only lists `entity_attributes`, but `add_relationship` takes `attrs` too);
+`eumeaus-plugin-host`'s async API (see Conventions); and the plugin
+signature scheme (§3.3 doesn't specify one — see `signature.rs`).
 
 ## Gotchas
 
@@ -89,9 +113,10 @@ only lists `entity_attributes`, but `add_relationship` takes `attrs` too).
   starts one explicitly (see `.github/workflows/ci.yml`). In a headless/SSH
   shell with no keyring daemon, these tests will hang or fail on
   `EngineError::Keychain`.
-- No `protoc` is assumed to be installed; `eumeaus-plugin-protocol` ships a
-  hand-written `stub` module mirroring `plugin.proto` until real
-  tonic-build/prost-build codegen is wired up in M3.
+- No system `protoc` is assumed to be installed; `eumeaus-plugin-protocol`'s
+  build.rs points `PROTOC` at the `protoc-bin-vendored` crate's bundled
+  binary instead. Don't add a "install protoc" CI step — it's unnecessary
+  and would mask a build.rs regression if the vendoring ever broke.
 - The starter entity/relationship taxonomy (SPEC.md §4.3) and several other
   points are flagged as **open questions** in SPEC.md §8 — check there before
   assuming a data-model detail is settled.

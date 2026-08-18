@@ -8,3 +8,7 @@ publish.workspace = true
 [dependencies]
 eumeaus-plugin-protocol.workspace = true
 thiserror.workspace = true
+tonic.workspace = true
+tokio = { workspace = true, features = ["net", "io-std", "io-util"] }
+tokio-stream = { workspace = true, features = ["net"] }
+async-trait.workspace = true
