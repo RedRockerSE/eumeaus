@@ -271,6 +271,30 @@ impl Case {
         )
     }
 
+    /// [`Case::start_scan`] split into "create the scan row and return its
+    /// id" (this) plus "run it" ([`Case::resume_scan`], which already
+    /// means "run every still-`PENDING` row"). Not in SPEC.md §3.1 at all
+    /// — lets a caller learn the `ScanId` and print/log it before blocking
+    /// on a scan that might run for a while or get killed mid-flight.
+    pub fn create_scan(
+        &mut self,
+        plugins_dir: &Path,
+        plugins: Vec<PluginRef>,
+        target: TargetEntity,
+        config: ScanConfig,
+        trust_policy: &crate::TrustPolicy,
+    ) -> Result<ScanId, EngineError> {
+        let plugin_names: Vec<String> = plugins.into_iter().map(|p| p.name).collect();
+        crate::scan::create(
+            &mut self.conn,
+            plugins_dir,
+            &plugin_names,
+            target,
+            config,
+            trust_policy,
+        )
+    }
+
     pub fn resume_scan(&mut self, scan_id: ScanId) -> Result<(), EngineError> {
         crate::scan::resume(&mut self.conn, scan_id.0)
     }

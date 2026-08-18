@@ -8,12 +8,13 @@ use eumeaus_plugin_sdk::PluginRuntime;
 
 struct Echo;
 
+#[async_trait::async_trait]
 impl PluginRuntime for Echo {
     fn describe(&self) -> (String, String) {
         ("stub-echo".to_string(), "0.1.0".to_string())
     }
 
-    fn check(&self, request: &CheckRequest) -> Vec<CheckResult> {
+    async fn check(&self, request: &CheckRequest) -> Vec<CheckResult> {
         vec![CheckResult {
             status: ConfidenceStatus::Found as i32,
             entities: vec![EntityFinding {

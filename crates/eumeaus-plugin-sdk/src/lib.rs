@@ -26,11 +26,18 @@ pub enum SdkError {
 
 /// Implemented by a plugin's collection logic; [`serve`] handles everything
 /// else (handshake, gRPC server, streaming the `Vec` back one item at a
-/// time).
+/// time). `check` is async, not sync — a real plugin's collection logic is
+/// almost always I/O (an HTTP request per site, for example), and the SDK
+/// runs it inside the same tokio runtime the gRPC server uses. A sync
+/// `check()` calling a *blocking* HTTP client would panic (reqwest's
+/// blocking client refuses to run nested inside an existing runtime); a
+/// plugin that's genuinely CPU-only can just `.await` nothing and return
+/// immediately.
+#[async_trait::async_trait]
 pub trait PluginRuntime: Send + Sync + 'static {
     /// `(plugin_name, plugin_version)`.
     fn describe(&self) -> (String, String);
-    fn check(&self, request: &CheckRequest) -> Vec<CheckResult>;
+    async fn check(&self, request: &CheckRequest) -> Vec<CheckResult>;
 }
 
 struct Adapter<R>(R);
@@ -57,6 +64,7 @@ impl<R: PluginRuntime> ProtoPluginRuntime for Adapter<R> {
         let results: Vec<Result<CheckResult, tonic::Status>> = self
             .0
             .check(request.get_ref())
+            .await
             .into_iter()
             .map(Ok)
             .collect();

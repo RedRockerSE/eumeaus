@@ -97,12 +97,15 @@ fn from_hex(s: &str) -> Result<Vec<u8>, EngineError> {
         .collect()
 }
 
-/// Starts a new scan: resolves the target entity, discovers plugins in
+/// Creates a new scan — resolves the target entity, discovers plugins in
 /// `plugins_dir` (filtered to `plugin_names` if non-empty, else every
 /// discovered plugin whose `contract.input_entity_types` includes the
-/// target's entity type), persists `scans`/`scan_plugin_runs` rows, and
-/// runs them all to completion (bounded by `config.worker_pool`) before
-/// returning.
+/// target's entity type), and persists `scans`/`scan_plugin_runs` rows,
+/// all `PENDING` — but does not run anything. [`start`] is
+/// `create` immediately followed by [`resume`]; split out so a caller
+/// (the CLI) can learn the `ScanId` before blocking on a scan that might
+/// run for a while, rather than only finding out once it's done or the
+/// process has already been killed.
 ///
 /// Deviates from SPEC.md §3.1's `start_scan(plugin: PluginRef, ...)`
 /// (singular): `ScanConfig.worker_pool` only means something if a scan can
@@ -112,13 +115,13 @@ fn from_hex(s: &str) -> Result<Vec<u8>, EngineError> {
 /// plugin list or trust key comes from, so this makes them explicit
 /// parameters here and persists both in `config_snapshot` for
 /// [`resume`], which does keep the spec's `resume_scan(scan_id)` shape.
-pub(crate) fn start(
+pub(crate) fn create(
     conn: &mut Connection,
     plugins_dir: &Path,
     plugin_names: &[String],
     target: TargetEntity,
     config: ScanConfig,
-    trust_policy: TrustPolicy,
+    trust_policy: &TrustPolicy,
 ) -> Result<ScanId, EngineError> {
     let target_entity = crud::get_entity(conn, target.id)?;
 
@@ -138,7 +141,7 @@ pub(crate) fn start(
         worker_pool,
         rate_limit_per_sec: config.rate_limit_per_sec,
         proxy: config.proxy.clone(),
-        trust_policy: snapshot_trust_policy(&trust_policy),
+        trust_policy: snapshot_trust_policy(trust_policy),
     };
     let now = now_unix_ms();
 
@@ -169,18 +172,30 @@ pub(crate) fn start(
     }
     tx.commit()?;
 
-    run_to_completion(
-        conn,
-        scan_id,
-        &target_entity,
-        selected,
-        worker_pool,
-        config.rate_limit_per_sec,
-        trust_policy,
-    )?;
-    finalize_scan_status(conn, scan_id)?;
-
     Ok(ScanId(scan_id))
+}
+
+/// [`create`] immediately followed by [`resume`] — the one-call form for
+/// callers that don't need the `ScanId` until the scan is done anyway
+/// (e.g. tests).
+pub(crate) fn start(
+    conn: &mut Connection,
+    plugins_dir: &Path,
+    plugin_names: &[String],
+    target: TargetEntity,
+    config: ScanConfig,
+    trust_policy: TrustPolicy,
+) -> Result<ScanId, EngineError> {
+    let scan_id = create(
+        conn,
+        plugins_dir,
+        plugin_names,
+        target,
+        config,
+        &trust_policy,
+    )?;
+    resume(conn, scan_id.0)?;
+    Ok(scan_id)
 }
 
 /// Re-runs only the `scan_plugin_runs` still `PENDING` for `scan_id` — not

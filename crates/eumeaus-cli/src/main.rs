@@ -31,6 +31,8 @@ enum CliError {
         "no {0} entity with key {1:?} exists in this case yet — add it first with `entity add`"
     )]
     UnknownScanTarget(String, String),
+    #[error("invalid --trusted-key: {0}")]
+    InvalidTrustedKey(String),
 }
 
 #[derive(Parser)]
@@ -179,6 +181,13 @@ enum ScanCmd {
         proxy: Option<String>,
         #[arg(long = "worker-pool")]
         worker_pool: Option<u32>,
+        /// Hex-encoded 32-byte Ed25519 public key. If given, every plugin
+        /// in this scan must carry a valid signature against it (refused
+        /// otherwise); if omitted, plugins load unsigned. Also not in
+        /// SPEC.md §3.4 — there's no credential/trust-store config yet
+        /// (M6+) for the CLI to read a default trust key from.
+        #[arg(long = "trusted-key")]
+        trusted_key: Option<String>,
     },
     Status {
         scan_id: String,
@@ -212,6 +221,27 @@ fn parse_attrs(raw: &[String]) -> Vec<Attribute> {
 
 fn parse_uuid(raw: &str) -> Result<Uuid, CliError> {
     Uuid::parse_str(raw).map_err(|e| CliError::InvalidId(raw.to_string(), e))
+}
+
+/// `--trusted-key`: hex-encoded 32-byte Ed25519 public key, or absent for
+/// `TrustPolicy::AllowUnsigned`.
+fn parse_trust_policy(hex_key: Option<&str>) -> Result<eumeaus_engine::TrustPolicy, CliError> {
+    let Some(hex_key) = hex_key else {
+        return Ok(eumeaus_engine::TrustPolicy::AllowUnsigned);
+    };
+    if hex_key.len() != 64 {
+        return Err(CliError::InvalidTrustedKey(
+            "must be exactly 64 hex characters (32 bytes)".to_string(),
+        ));
+    }
+    let mut bytes = [0u8; 32];
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex_key[i * 2..i * 2 + 2], 16)
+            .map_err(|e| CliError::InvalidTrustedKey(e.to_string()))?;
+    }
+    let trusted_key = ed25519_dalek::VerifyingKey::from_bytes(&bytes)
+        .map_err(|e| CliError::InvalidTrustedKey(e.to_string()))?;
+    Ok(eumeaus_engine::TrustPolicy::RequireSignature { trusted_key })
 }
 
 fn parse_entity_id(raw: &str) -> Result<EntityId, CliError> {
@@ -398,6 +428,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 rate_limit,
                 proxy,
                 worker_pool,
+                trusted_key,
             } => {
                 let mut case = require_case(&cli.case)?;
                 let entity_type = EntityType::from_str(&target_type).expect("infallible");
@@ -410,7 +441,13 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     .into_iter()
                     .map(|name| eumeaus_engine::PluginRef { name })
                     .collect();
-                let scan_id = case.start_scan(
+                let trust_policy = parse_trust_policy(trusted_key.as_deref())?;
+                // create_scan (not start_scan) so the id prints before the
+                // scan blocks — this may run for a while, and a caller
+                // watching the terminal (or `scan status`ing from another
+                // one) should be able to find it even if this process
+                // gets killed mid-flight.
+                let scan_id = case.create_scan(
                     &plugins_dir,
                     plugins,
                     eumeaus_engine::TargetEntity { id: target.id },
@@ -419,12 +456,15 @@ fn run(cli: Cli) -> Result<(), CliError> {
                         rate_limit_per_sec: rate_limit,
                         proxy,
                     },
-                    // No trust-key configuration exists yet (that's
-                    // credential/config management, M6+): every plugin
-                    // loads unsigned until it does.
-                    eumeaus_engine::TrustPolicy::AllowUnsigned,
+                    &trust_policy,
                 )?;
                 println!("{scan_id}");
+                // Stdout is block- not line-buffered once piped (not a
+                // TTY) — without an explicit flush here, a caller reading
+                // our stdout wouldn't see this line until we exit, since
+                // resume_scan below can block for a while.
+                std::io::Write::flush(&mut std::io::stdout()).ok();
+                case.resume_scan(scan_id)?;
                 Ok(())
             }
             ScanCmd::Status { scan_id } => {

@@ -1,0 +1,21 @@
+[package]
+name = "eumeaus-username-search-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "eumeaus-username-search-plugin"
+path = "src/main.rs"
+
+[dependencies]
+eumeaus-plugin-protocol.workspace = true
+eumeaus-plugin-sdk.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "io-util", "time"] }
+
+[dev-dependencies]
+wiremock.workspace = true

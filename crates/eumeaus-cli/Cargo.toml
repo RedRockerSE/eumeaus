@@ -14,8 +14,21 @@ eumeaus-engine.workspace = true
 clap.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+ed25519-dalek.workspace = true
 
 [dev-dependencies]
 assert_cmd = "2.0.16"
 predicates = "3.1.2"
 tempfile = "3.13.0"
+rand = "0.8.7"
+ed25519-dalek = { workspace = true, features = ["rand_core"] }
+# Only used to build examples/quick_check.rs (a test-fixture plugin) and to
+# construct/sign plugin.toml manifests for the real username-search-plugin
+# binary at test time — see CLAUDE.md's note on why fixture plugins are
+# Cargo examples, not [[bin]] targets.
+eumeaus-plugin-sdk.workspace = true
+eumeaus-plugin-protocol.workspace = true
+eumeaus-plugin-host.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "io-util"] }
+wiremock.workspace = true

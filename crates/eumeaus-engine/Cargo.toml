@@ -26,3 +26,4 @@ tempfile = "3.13.0"
 # pattern, explained in more detail.
 eumeaus-plugin-sdk.workspace = true
 eumeaus-plugin-protocol.workspace = true
+async-trait.workspace = true

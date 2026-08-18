@@ -34,4 +34,5 @@ tokio-stream = { workspace = true, features = ["net"] }
 # (or `cargo build --examples`), so this never leaks into a production
 # build of the host.
 eumeaus-plugin-sdk.workspace = true
+async-trait.workspace = true
 rand = "0.8.7"

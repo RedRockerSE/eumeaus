@@ -28,8 +28,12 @@ before merge.
   (`plugin.proto`). No logic beyond generated types belongs here.
 - `crates/eumeaus-plugin-sdk` — helper library for plugin authors (handshake
   + gRPC server boilerplate). Plugins are not required to use it or be Rust.
+- `crates/eumeaus-username-search-plugin` — the real v1 PoC plugin (M5): a
+  small Sherlock-equivalent, built on the SDK. A real shipped `[[bin]]`,
+  not a test fixture — `cargo build` produces it normally.
 - `crates/eumeaus-cli` — thin CLI wrapper over the engine API; also the
-  end-to-end test surface (`crates/eumeaus-cli/tests/`).
+  end-to-end test surface (`crates/eumeaus-cli/tests/`), including the v1
+  proof (`e2e_v1_proof.rs`, SPEC.md §6).
 
 ## Conventions
 
@@ -54,39 +58,10 @@ before merge.
   and both are recorded as `audit_events` rows, never mutating a fact.
 - Credentials are never passed via subprocess argv or env vars (visible to
   other processes) — injected into the gRPC request body by the plugin host.
-- Plugin subprocess/gRPC wiring uses the tonic 0.12.x line (not latest —
-  0.13+ split prost codegen into a separate `tonic-prost-build` crate with a
-  less-established API; 0.12.x's classic `tonic_build::compile_protos` is
-  better documented and lower-risk). `tower` is pinned to exactly what
-  tonic 0.12 depends on (`0.4.7`) — bumping it alone would leave two
-  incompatible `tower` majors in the graph.
-- `eumeaus-plugin-host`'s public API (`load`/`invoke`/`shutdown`) is async,
-  unlike SPEC.md §3.1's sync illustrative signature. `eumeaus-engine`'s
-  `Case::start_scan`/`resume_scan` bridge it: they own a one-shot
-  `tokio::runtime::Runtime` and `block_on` the whole scan to completion, so
-  the public `Case` API stays sync throughout. Only the per-plugin
-  `invoke()` calls run concurrently (`tokio::spawn`, bounded by
-  `worker_pool`) — every DB write happens in the orchestrating task itself,
-  since `rusqlite::Connection` is `!Sync` and must never cross a spawned
-  task boundary. See `eumeaus-engine/src/scan.rs`'s module doc.
-- A scan's `plugins_dir`/`TrustPolicy` aren't in SPEC.md §3.1's
-  `resume_scan(scan_id)` signature (single arg), so they're persisted as
-  JSON in `scans.config_snapshot` at `start_scan` time and read back on
-  resume — including the trusted Ed25519 key as hex, if one was used. No
-  CLI flag sets a trust key yet (that's credential/config management,
-  M6+); `scan run` always loads plugins with `TrustPolicy::AllowUnsigned`
-  until one exists.
-- Test-fixture plugin binaries (`eumeaus-plugin-host/examples/stub_*.rs`,
-  `eumeaus-engine/examples/scan_*.rs`) are Cargo *examples*, not `[[bin]]`
-  targets — a same-package `[[bin]]` needing a dev-dependency (they depend
-  on `eumeaus-plugin-sdk`) breaks plain `cargo build`, since dev-deps
-  aren't linked for `[[bin]]`s outside `cargo test`. Examples are exempt
-  from plain `cargo build` and still get dev-deps under `cargo test`, but
-  have no `CARGO_BIN_EXE_`-style env var, so their tests locate the
-  compiled binary relative to their own `current_exe()` instead. They're
-  duplicated per-crate (plugin-host's `stub_*` vs. engine's `scan_*`)
-  rather than shared, so `cargo test -p eumeaus-engine` alone still works
-  — only `-p`'s own dev-deps get built, not another crate's.
+- Touching the plugin protocol/host/SDK, writing a plugin (real or test
+  fixture), or scan resumability internals: load the `plugin-development`
+  skill first — subprocess/gRPC/async gotchas, signing, and the
+  test-fixture-as-Cargo-example pattern all live there, not here.
 - `.eum` case files are SQLCipher-encrypted SQLite; opening one takes an
   exclusive OS file lock (`Case::open`/`create`/`close` are implemented, M1).
   The key lives in the OS keychain under service `"eumeaus"`, entry =
@@ -103,19 +78,22 @@ before merge.
 
 ## Current status
 
-M0–M4 are done: case lifecycle over real SQLCipher (M1); entity/relationship
-CRUD, merge/split, and audit trail via the CLI (M2); plugin manifest
-discovery, semver/signature validation, and real subprocess+gRPC-over-UDS
-spawn/handshake/invoke/timeout in `eumeaus-plugin-host` (M3); and scan
-orchestration wired end to end through `scan run`/`status`/`resume` — worker
-pool, rate limiting, crash-safe resumability, result ingestion through the
-same auto-merge path as manual entry (M4). The credential store is still
-NotImplemented — see SPEC.md §7 for the milestone order.
+M0–M5 are done — the full v1 proof (SPEC.md §6) passes
+(`eumeaus-cli/tests/e2e_v1_proof.rs`): case lifecycle over real SQLCipher
+(M1); entity/relationship CRUD, merge/split, and audit trail via the CLI
+(M2); plugin manifest discovery, semver/signature validation, and real
+subprocess+gRPC-over-UDS spawn/handshake/invoke/timeout (M3); scan
+orchestration — worker pool, rate limiting, crash-safe resumability, result
+auto-merge — wired end to end through `scan run`/`status`/`resume` (M4);
+and a real Sherlock-equivalent PoC plugin, signed, checking real sites over
+real HTTP (M5). The credential store is still NotImplemented — see SPEC.md
+§7 for the milestone order.
 
 Deviations from SPEC.md's illustrative APIs, each with a reason documented
 at the point of deviation: `Case::get_entity`/`list_attribute_records`/
-`find_entity_by_key` (§3.1 gives no signatures, but `entity show`/`scan run
---target-type/--target-value` need them); `RelationshipType::Custom` plus a
+`find_entity_by_key`/`create_scan` (§3.1 gives no signatures, but `entity
+show`/`scan run --target-type/--target-value`/printing a scan id before it
+blocks need them); `RelationshipType::Custom` plus a
 `relationship_attributes` table (§4.2 only lists `entity_attributes`, but
 `add_relationship` takes `attrs` too); `eumeaus-plugin-host`'s async API and
 `Case::start_scan`'s `Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params

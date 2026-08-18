@@ -8,13 +8,14 @@ use eumeaus_plugin_sdk::PluginRuntime;
 
 struct ScanHang;
 
+#[async_trait::async_trait]
 impl PluginRuntime for ScanHang {
     fn describe(&self) -> (String, String) {
         ("scan-hang".to_string(), "0.1.0".to_string())
     }
 
-    fn check(&self, _request: &CheckRequest) -> Vec<CheckResult> {
-        std::thread::sleep(std::time::Duration::from_secs(3600));
+    async fn check(&self, _request: &CheckRequest) -> Vec<CheckResult> {
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
         vec![]
     }
 }

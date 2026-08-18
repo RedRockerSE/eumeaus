@@ -9,13 +9,14 @@ const DELAY_MS: u64 = 300;
 
 struct ScanSlow;
 
+#[async_trait::async_trait]
 impl PluginRuntime for ScanSlow {
     fn describe(&self) -> (String, String) {
         ("scan-slow".to_string(), "0.1.0".to_string())
     }
 
-    fn check(&self, request: &CheckRequest) -> Vec<CheckResult> {
-        std::thread::sleep(std::time::Duration::from_millis(DELAY_MS));
+    async fn check(&self, request: &CheckRequest) -> Vec<CheckResult> {
+        tokio::time::sleep(std::time::Duration::from_millis(DELAY_MS)).await;
         vec![CheckResult {
             status: ConfidenceStatus::Found as i32,
             entities: vec![EntityFinding {
