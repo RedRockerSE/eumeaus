@@ -106,9 +106,10 @@ release, which caught a real checksum-file newline bug (see
 `release.yml`'s Windows packaging step comment).
 
 GUI (SPEC.md §9, `feat/gui-tauri` branch): design resolved (Tauri 2.x,
-React+TS, Linux+Windows only, `crates/` workspace). G0 scaffold
-(`eumeaus-gui`) in progress — blocked locally on a missing system dep,
-see Gotchas.
+React+TS, Linux+Windows only, `crates/` workspace). G0 (scaffold) done —
+`eumeaus-gui`'s `list_entity_types` command round-trips into
+`eumeaus-engine` and renders, verified live via `tauri dev`. G1 (case
+lifecycle) is next.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/
