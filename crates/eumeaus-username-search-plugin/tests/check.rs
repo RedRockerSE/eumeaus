@@ -4,12 +4,15 @@
 //! calls for: recorded/canned responses replayed deterministically.
 
 use eumeaus_plugin_protocol::ConfidenceStatus;
-use eumeaus_username_search_plugin::{check_site, SITES};
+use eumeaus_username_search_plugin::{check_site, default_sites, Site};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-fn site(slug: &str) -> &'static eumeaus_username_search_plugin::Site {
-    SITES.iter().find(|s| s.slug == slug).unwrap()
+fn site(slug: &str) -> Site {
+    default_sites()
+        .into_iter()
+        .find(|s| s.slug == slug)
+        .unwrap()
 }
 
 fn client() -> reqwest::Client {
@@ -25,7 +28,7 @@ async fn status_code_site_found() {
         .mount(&server)
         .await;
 
-    let result = check_site(&client(), site("github"), "carol", Some(&server.uri())).await;
+    let result = check_site(&client(), &site("github"), "carol", Some(&server.uri())).await;
 
     assert_eq!(result.status, ConfidenceStatus::Found as i32);
     assert_eq!(result.entities.len(), 1);
@@ -46,7 +49,7 @@ async fn status_code_site_not_found() {
         .mount(&server)
         .await;
 
-    let result = check_site(&client(), site("github"), "nobody", Some(&server.uri())).await;
+    let result = check_site(&client(), &site("github"), "nobody", Some(&server.uri())).await;
 
     assert_eq!(result.status, ConfidenceStatus::NotFound as i32);
     assert!(result.entities.is_empty());
@@ -62,7 +65,13 @@ async fn body_marker_site_found() {
         .mount(&server)
         .await;
 
-    let result = check_site(&client(), site("flaky-forum"), "carol", Some(&server.uri())).await;
+    let result = check_site(
+        &client(),
+        &site("flaky-forum"),
+        "carol",
+        Some(&server.uri()),
+    )
+    .await;
 
     assert_eq!(result.status, ConfidenceStatus::Found as i32);
     assert_eq!(result.entities[0].canonical_key, "flaky-forum:carol");
@@ -79,7 +88,7 @@ async fn body_marker_site_not_found() {
 
     let result = check_site(
         &client(),
-        site("flaky-forum"),
+        &site("flaky-forum"),
         "nobody",
         Some(&server.uri()),
     )
@@ -98,7 +107,7 @@ async fn rate_limited_site_is_uncertain_not_error() {
         .mount(&server)
         .await;
 
-    let result = check_site(&client(), site("github"), "carol", Some(&server.uri())).await;
+    let result = check_site(&client(), &site("github"), "carol", Some(&server.uri())).await;
 
     assert_eq!(
         result.status,
@@ -117,7 +126,7 @@ async fn unexpected_status_is_error() {
         .mount(&server)
         .await;
 
-    let result = check_site(&client(), site("github"), "carol", Some(&server.uri())).await;
+    let result = check_site(&client(), &site("github"), "carol", Some(&server.uri())).await;
 
     assert_eq!(result.status, ConfidenceStatus::Error as i32);
     assert!(!result.error_message.is_empty());
@@ -129,7 +138,7 @@ async fn unreachable_host_is_error_not_a_panic() {
     // exercises the connection-failure path, not just non-2xx responses.
     let result = check_site(
         &client(),
-        site("github"),
+        &site("github"),
         "carol",
         Some("http://127.0.0.1:1"),
     )

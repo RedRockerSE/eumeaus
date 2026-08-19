@@ -1,6 +1,14 @@
 //! Subprocess lifecycle: spawn a plugin binary, perform the go-plugin-style
 //! handshake over its stdout, connect a gRPC client over the Unix domain
 //! socket it reports, and enforce per-invocation timeouts.
+//!
+//! Two env vars are set on every spawned plugin: `EUMEAUS_PLUGIN_DIR` (a
+//! fresh per-invocation scratch dir, currently used for the handshake
+//! socket) and `EUMEAUS_PLUGIN_MANIFEST_DIR` (the stable directory holding
+//! the plugin's own `plugin.toml`, for finding sibling config/data files —
+//! e.g. eumeaus-username-search-plugin's `sites.toml`). Neither is part of
+//! the gRPC wire contract (`plugin.proto`); both are host-provided
+//! filesystem conveniences a plugin may ignore entirely.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -72,8 +80,22 @@ impl PluginHost {
             .prefix("eumeaus-plugin-")
             .tempdir()?;
 
+        // Canonicalized so it's stable regardless of the host's own cwd at
+        // spawn time — unlike EUMEAUS_PLUGIN_DIR (a fresh, per-invocation
+        // work dir), this points at the plugin's actual installation
+        // directory, letting it find sibling files next to its own
+        // plugin.toml (e.g. eumeaus-username-search-plugin's sites.toml).
+        // Falls back to the raw path if canonicalization fails (e.g. the
+        // directory was removed since discovery) rather than failing the
+        // whole spawn over a convenience env var.
+        let manifest_dir = manifest
+            .manifest_dir
+            .canonicalize()
+            .unwrap_or_else(|_| manifest.manifest_dir.clone());
+
         let mut child = Command::new(manifest.entrypoint_path())
             .env("EUMEAUS_PLUGIN_DIR", work_dir.path())
+            .env("EUMEAUS_PLUGIN_MANIFEST_DIR", &manifest_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

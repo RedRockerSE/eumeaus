@@ -48,6 +48,29 @@ built, not another crate's.
 not a fixture, so it's just built normally by `cargo build --workspace`
 and located via `workspace_bin`, not a dev-dependency trick.
 
+## Finding a plugin's own files at runtime
+
+`eumeaus-plugin-host` sets two env vars on every spawned plugin process
+(`host.rs`'s `load`): `EUMEAUS_PLUGIN_DIR` — a fresh, per-invocation
+scratch dir (currently just holds the gRPC handshake socket; wiped after
+the call) — and `EUMEAUS_PLUGIN_MANIFEST_DIR` — the stable directory
+containing the plugin's own `plugin.toml`, canonicalized. Neither is part
+of `plugin.proto`; both are filesystem conveniences a plugin can ignore.
+
+`EUMEAUS_PLUGIN_MANIFEST_DIR` is how a plugin finds *its own* sibling
+config/data files without the engine or protocol needing to know anything
+about them — `eumeaus-username-search-plugin`'s `sites.toml` (its site
+list, externalized so a user can add/remove checks without a rebuild) is
+the worked example: `load_sites()` checks
+`EUMEAUS_USERNAME_SEARCH_SITES_FILE` (an explicit override, used by
+tests) first, then `<EUMEAUS_PLUGIN_MANIFEST_DIR>/sites.toml`, falling
+back to a compiled-in default if neither resolves or the file fails to
+parse (warning on stderr — same "degrade, don't abort" policy SPEC.md §5
+uses for a bad plugin manifest). Worth remembering: a plugin's signature
+covers only `name + version + entrypoint-binary-hash` (see Signing,
+below) — never a sidecar config file like this one — so externalizing
+data this way means it's *not* covered by signature verification.
+
 ## Signing
 
 `eumeaus-plugin-host/src/signature.rs` signs

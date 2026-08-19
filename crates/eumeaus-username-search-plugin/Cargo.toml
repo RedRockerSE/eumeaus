@@ -15,7 +15,11 @@ eumeaus-plugin-sdk.workspace = true
 async-trait.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "io-util", "time"] }
 
 [dev-dependencies]
 wiremock.workspace = true
+tempfile = "3.13.0"

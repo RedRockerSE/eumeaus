@@ -221,6 +221,50 @@ default_timeout_ms = 8000
 right alongside the CLI (`cargo build --workspace` produces
 `target/debug/eumeaus-username-search-plugin`).
 
+**Configuring which sites `username-search` checks.** The site list isn't
+hardcoded — drop a `sites.toml` next to `username-search`'s `plugin.toml`
+to add or remove checks without a rebuild:
+
+```
+plugins/
+  username-search/
+    plugin.toml
+    sites.toml   # optional — falls back to a built-in github/gitlab
+                 # default list if absent or invalid
+```
+
+```toml
+[[sites]]
+slug = "github"
+display_name = "GitHub"
+base_url = "https://github.com"
+path_template = "/{username}"
+detection = "status_code"      # 200 = found, 404 = not found
+
+[[sites]]
+slug = "some-forum"
+display_name = "Some Forum"
+base_url = "https://forum.example.com"
+path_template = "/u/{username}"
+detection = "body_marker"      # always 200; page text decides found/not
+not_found_marker = "Profile not found"
+```
+
+A malformed `sites.toml` doesn't fail the scan — it prints a warning and
+falls back to the built-in default list:
+
+```console
+$ eumeaus --case demo.eum scan run --plugins-dir plugins --target-type Username --target-value torvalds
+warning: /path/to/plugins/username-search/sites.toml is invalid (invalid TOML in ...); falling back to the built-in site list
+4b3229c7-da49-4ad5-89e8-40b3936a50a4
+```
+
+**Trust note:** a plugin's `--trusted-key` signature covers its
+name/version/binary hash only, never `sites.toml` — editing this file
+doesn't invalidate an otherwise-signed plugin's signature. That's by
+design (it's meant to be freely user-editable), just worth knowing when
+reasoning about what a signature actually attests to.
+
 ```console
 $ eumeaus --case acme-investigation.eum entity add --type Username --key torvalds
 e13fee0c-7518-4a32-9b90-c0da8e753c4e
