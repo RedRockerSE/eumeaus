@@ -10,7 +10,13 @@ thiserror.workspace = true
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher"] }
+# vendored-openssl (not plain bundled-sqlcipher): statically links a
+# from-source-built OpenSSL into the binary instead of the system's
+# libcrypto.so/.dll — a release binary built with plain bundled-sqlcipher
+# dynamically links the *build machine's* OpenSSL, which breaks on any
+# end-user machine without a compatible version installed. Confirmed via
+# `ldd` before this change (libcrypto.so.3 was there; it isn't after).
+rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher-vendored-openssl"] }
 keyring = "4.1.6"
 getrandom = "0.4.3"
 eumeaus-plugin-host.workspace = true

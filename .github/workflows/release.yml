@@ -1,0 +1,135 @@
+name: Release
+
+# Fires on a version tag push (e.g. v0.1.0) — not on every push/PR, unlike
+# ci.yml. check-version guards against the most common release mistake
+# (tagging before bumping Cargo.toml's workspace version) before any
+# platform build starts.
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm the tag matches Cargo.toml's workspace version
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          cargo_version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          if [ "$tag" != "$cargo_version" ]; then
+            echo "::error::tag v$tag does not match [workspace.package].version ($cargo_version) in Cargo.toml"
+            exit 1
+          fi
+
+  build:
+    needs: check-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      # musl-gcc, needed by the `cc` crate to cross-compile SQLCipher and
+      # vendored OpenSSL's C sources against musl instead of glibc — a
+      # fully static binary with no runtime libc-version dependency.
+      - name: Install musl-tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} --bin eumeaus --bin eumeaus-username-search-plugin
+
+      - name: Package (Linux)
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/}"
+          stage="eumeaus-${version}-${{ matrix.target }}"
+          bin_dir="target/${{ matrix.target }}/release"
+
+          mkdir -p "$stage/plugins/username-search"
+          cp "$bin_dir/eumeaus" "$stage/"
+          cp "$bin_dir/eumeaus-username-search-plugin" "$stage/plugins/username-search/"
+          # entrypoint rewritten relative (portable to wherever this gets
+          # unpacked) — the shipped plugin.toml's own entrypoint is an
+          # illustrative absolute path, not meant for a real install.
+          sed 's#^entrypoint = .*#entrypoint = "eumeaus-username-search-plugin"#' \
+            crates/eumeaus-username-search-plugin/plugin.toml \
+            > "$stage/plugins/username-search/plugin.toml"
+          cp LICENSE-MIT LICENSE-APACHE CLI.md README.md "$stage/"
+
+          tar czf "${stage}.tar.gz" "$stage"
+          sha256sum "${stage}.tar.gz" > "${stage}.tar.gz.sha256"
+
+      - name: Package (Windows)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:GITHUB_REF -replace 'refs/tags/', ''
+          $stage = "eumeaus-$version-${{ matrix.target }}"
+          $binDir = "target/${{ matrix.target }}/release"
+
+          New-Item -ItemType Directory -Path "$stage/plugins/username-search" -Force | Out-Null
+          Copy-Item "$binDir/eumeaus.exe" "$stage/"
+          Copy-Item "$binDir/eumeaus-username-search-plugin.exe" "$stage/plugins/username-search/"
+          (Get-Content crates/eumeaus-username-search-plugin/plugin.toml) `
+            -replace '^entrypoint = .*', 'entrypoint = "eumeaus-username-search-plugin.exe"' |
+            Set-Content "$stage/plugins/username-search/plugin.toml"
+          Copy-Item LICENSE-MIT,LICENSE-APACHE,CLI.md,README.md "$stage/"
+
+          # "$stage.zip" would be parsed as member access ($stage.zip
+          # property), not concatenation - ${stage} disambiguates.
+          $zipName = "${stage}.zip"
+          Compress-Archive -Path $stage -DestinationPath $zipName
+          $hash = (Get-FileHash $zipName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zipName" | Out-File "${zipName}.sha256" -Encoding ascii -NoNewline
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            eumeaus-*.tar.gz
+            eumeaus-*.tar.gz.sha256
+            eumeaus-*.zip
+            eumeaus-*.zip.sha256
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Combine checksums into one file (what install.sh/install.ps1 fetch)
+        run: cat dist/*.sha256 > dist/checksums.txt
+      # draft: true — a human reviews and publishes the release manually
+      # rather than this workflow making it public unattended.
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt

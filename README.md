@@ -17,6 +17,31 @@ HTTP (M5); and OS-keychain-backed credential storage, injected into a
 plugin's request only — never the case file, subprocess argv, or
 environment (M6).
 
+## Installation
+
+Prebuilt releases (Linux x86_64, Windows x86_64) ship via GitHub Releases.
+Install with one line:
+
+```sh
+# Linux
+curl -fsSL https://raw.githubusercontent.com/RedRockerSE/eumeaus/main/install.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/RedRockerSE/eumeaus/main/install.ps1 | iex
+```
+
+Both scripts verify a SHA-256 checksum against the release before
+installing, and also install the bundled `username-search` plugin ready
+to use with `scan run --plugins-dir`. See
+[`install.sh`](./install.sh)/[`install.ps1`](./install.ps1) for exactly
+what they do — nothing hidden, no piping to a shell you haven't read.
+
+No release yet for your platform, or you'd rather build it yourself? See
+"Commands" below — `cargo build --release` produces the same binary the
+release workflow ships.
+
 ## Workspace layout
 
 - `crates/eumeaus-engine` — case lifecycle, entity/relationship/provenance data model, scan orchestration.

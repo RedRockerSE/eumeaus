@@ -13,7 +13,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/magjon/eumeaus"
+repository = "https://github.com/RedRockerSE/eumeaus"
 publish = false
 
 [workspace.dependencies]
@@ -59,3 +59,14 @@ rpassword = "7.5.4"
 
 [profile.dev]
 debug = 1
+
+# Only affects `cargo build --release`, run in CI on a tag push (see
+# .github/workflows/release.yml) — the extra compile time doesn't cost
+# anything on every regular push. strip drops debug symbols (smaller
+# binary, no leaked build-path info); lto/codegen-units=1 trade compile
+# time for a smaller, marginally faster binary — worthwhile for something
+# actually shipped to end users.
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

@@ -9,12 +9,21 @@ document.
 
 ## Building and running
 
+Prebuilt releases exist — see [`README.md`](./README.md)'s Installation
+section for the one-line installer. To build from source instead:
+
 ```sh
 cargo build --workspace
 ./target/debug/eumeaus --help
 ```
 
-(`cargo build --release` for `./target/release/eumeaus` instead.)
+`cargo build --release` (`./target/release/eumeaus`) is what
+`.github/workflows/release.yml` ships — statically linked (SQLCipher's
+`bundled-sqlcipher-vendored-openssl` feature; a plain `bundled-sqlcipher`
+build dynamically links the *build machine's* OpenSSL, which breaks on a
+different machine), stripped, and LTO'd. A release build takes noticeably
+longer than a dev one (OpenSSL compiles from source) — expect several
+minutes, not seconds.
 
 ## Concepts
 

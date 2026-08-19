@@ -133,17 +133,17 @@ one — see `signature.rs`).
   build.rs points `PROTOC` at the `protoc-bin-vendored` crate's bundled
   binary instead. Don't add a "install protoc" CI step — it's unnecessary
   and would mask a build.rs regression if the vendoring ever broke.
-- Several policy points remain **open questions** in SPEC.md §8 (multi-case
-  concurrency, legal/ToS posture, update mechanism) — Current status above
-  tracks what's resolved.
+- SPEC.md §8.8 (update mechanism) is the one still-open question — can't
+  be resolved before the GUI milestone exists.
+- `rusqlite` uses `bundled-sqlcipher-vendored-openssl`, not plain
+  `bundled-sqlcipher` — the latter dynamically links the *build machine's*
+  OpenSSL (confirmed via `ldd`), breaking release binaries on any other
+  machine. Don't "simplify" this back.
 - `case export`'s `sqlite`/`portable`/`Case::import` all lean on
-  SQLCipher's `sqlcipher_export()` SQL function via `ATTACH DATABASE ...
-  KEY ...`; it returns `NULL`, not a row count, so query it with
-  `Option<i64>`, not `i64` (`InvalidColumnType` otherwise). Its `KEY`
-  clause takes two different forms that are *not* interchangeable: a
-  passphrase (`ExportFormat::Portable`) is a plain string, safe as a bound
-  parameter; the keychain's raw hex key (everywhere else, incl.
-  `Case::import`'s destination) needs the literal `x'<hex>'` blob syntax,
-  which only SQLite/SQLCipher recognizes when it's actually written in the
-  SQL text — a bound parameter holding that same string is just parsed as
-  a (wrong) passphrase, not a raw key.
+  SQLCipher's `sqlcipher_export()` via `ATTACH DATABASE ... KEY ...`; it
+  returns `NULL`, not a row count (`Option<i64>`, not `i64`). Its `KEY`
+  clause takes two *non-interchangeable* forms: a passphrase
+  (`ExportFormat::Portable`) is a plain string, safe as a bound parameter;
+  the keychain's raw hex key needs the literal `x'<hex>'` blob syntax,
+  which only SQLite recognizes written directly in the SQL text — a bound
+  parameter with that same string is just parsed as a wrong passphrase.
