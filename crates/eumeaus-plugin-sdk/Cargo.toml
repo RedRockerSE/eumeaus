@@ -9,6 +9,10 @@ publish.workspace = true
 eumeaus-plugin-protocol.workspace = true
 thiserror.workspace = true
 tonic.workspace = true
-tokio = { workspace = true, features = ["net", "io-std", "io-util"] }
-tokio-stream = { workspace = true, features = ["net"] }
+# "sync" (mpsc channel) backs the Windows named-pipe accept loop in
+# serve_named_pipe — its ServerOptions::create/connect API has no
+# UnixListenerStream-style ready-made Stream wrapper, so a background task
+# bridges it into one via a channel. See lib.rs's module doc.
+tokio = { workspace = true, features = ["net", "io-std", "io-util", "sync"] }
+tokio-stream = { workspace = true, features = ["net", "sync"] }
 async-trait.workspace = true

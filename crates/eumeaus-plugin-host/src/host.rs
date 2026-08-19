@@ -30,12 +30,20 @@ use crate::{PluginError, TrustPolicy};
 
 /// Handshake magic string and core protocol version, written by the
 /// plugin's first stdout line as `MAGIC|CORE_VERSION|NETWORK|ADDRESS|WIRE`
-/// (SPEC.md §2.2). `NETWORK` is always `unix` and `WIRE` always `grpc` for
-/// now — see the module doc for why there's no Windows named-pipe support
-/// yet.
+/// (SPEC.md §2.2). `WIRE` is always `grpc`; `NETWORK` is `unix` on Unix or
+/// `namedpipe` on Windows — [`eumeaus_plugin_sdk::serve`] on the plugin
+/// side picks the one matching the platform it's actually running on, and
+/// [`EXPECTED_NETWORK`] here does the same, so a handshake line claiming
+/// the wrong platform's transport is rejected as invalid rather than
+/// silently mismatched.
 const HANDSHAKE_MAGIC: &str = "EUMEAUS-PLUGIN";
 const HANDSHAKE_CORE_VERSION: &str = "1";
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[cfg(unix)]
+const EXPECTED_NETWORK: &str = "unix";
+#[cfg(windows)]
+const EXPECTED_NETWORK: &str = "namedpipe";
 
 /// A running plugin subprocess plus its gRPC client. Dropping this kills
 /// the process (`kill_on_drop`) even if [`PluginHost::shutdown`] is never
@@ -124,8 +132,8 @@ impl PluginHost {
             }
         };
 
-        let socket_path = match parse_handshake(&handshake_line) {
-            Some(path) => path,
+        let address = match parse_handshake(&handshake_line) {
+            Some(address) => address,
             None => {
                 let _ = child.kill().await;
                 return Err(PluginError::InvalidHandshake(
@@ -135,7 +143,7 @@ impl PluginHost {
             }
         };
 
-        let client = match connect_uds(&socket_path).await {
+        let client = match connect_transport(&address).await {
             Ok(channel) => PluginRuntimeClient::new(channel),
             Err(e) => {
                 let _ = child.kill().await;
@@ -206,7 +214,7 @@ fn parse_handshake(line: &str) -> Option<PathBuf> {
 
     if magic != HANDSHAKE_MAGIC
         || core_version != HANDSHAKE_CORE_VERSION
-        || network != "unix"
+        || network != EXPECTED_NETWORK
         || wire != "grpc"
     {
         return None;
@@ -214,18 +222,68 @@ fn parse_handshake(line: &str) -> Option<PathBuf> {
     Some(PathBuf::from(address))
 }
 
-async fn connect_uds(socket_path: &Path) -> Result<Channel, tonic::transport::Error> {
-    let socket_path = socket_path.to_path_buf();
+/// Connects to the plugin's gRPC server at `address` — a filesystem path
+/// (Unix domain socket) on Unix, or a `\\.\pipe\...` name (Windows named
+/// pipe) on Windows; [`parse_handshake`] already validated it matches
+/// [`EXPECTED_NETWORK`] for whichever platform this actually is.
+#[cfg(unix)]
+async fn connect_transport(address: &Path) -> Result<Channel, tonic::transport::Error> {
+    let address = address.to_path_buf();
     // The URI is a required but ignored placeholder: our connector always
-    // dials `socket_path` regardless of what tonic passes it.
+    // dials `address` regardless of what tonic passes it.
     Endpoint::try_from("http://[::]:0")
         .expect("static placeholder URI is always valid")
         .connect_with_connector(service_fn(move |_: Uri| {
-            let socket_path = socket_path.clone();
+            let address = address.clone();
             async move {
-                let stream = tokio::net::UnixStream::connect(socket_path).await?;
+                let stream = tokio::net::UnixStream::connect(address).await?;
                 Ok::<_, std::io::Error>(TokioIo::new(stream))
             }
         }))
         .await
+}
+
+#[cfg(windows)]
+async fn connect_transport(address: &Path) -> Result<Channel, tonic::transport::Error> {
+    let pipe_name = address.to_string_lossy().into_owned();
+    Endpoint::try_from("http://[::]:0")
+        .expect("static placeholder URI is always valid")
+        .connect_with_connector(service_fn(move |_: Uri| {
+            let pipe_name = pipe_name.clone();
+            async move {
+                let stream = connect_named_pipe_client(&pipe_name).await?;
+                Ok::<_, std::io::Error>(TokioIo::new(stream))
+            }
+        }))
+        .await
+}
+
+/// Windows named pipe client connections are synchronous-attempt, not
+/// async-await-until-ready like a Unix socket connect: `ClientOptions::open`
+/// either succeeds immediately or fails with `ERROR_PIPE_BUSY` if a server
+/// exists but hasn't posted its next accept yet (a brief window
+/// `eumeaus-plugin-sdk`'s own accept loop always reopens quickly) — retry
+/// briefly, per tokio's own documented pattern for this exact API, bounded
+/// so a genuinely stuck server doesn't hang forever.
+#[cfg(windows)]
+async fn connect_named_pipe_client(
+    pipe_name: &str,
+) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+    use tokio::net::windows::named_pipe::ClientOptions;
+
+    const ERROR_PIPE_BUSY: i32 = 231; // Win32 ERROR_PIPE_BUSY
+    const MAX_ATTEMPTS: u32 = 50; // ~1s total at 20ms between attempts
+
+    let mut last_err = None;
+    for _ in 0..MAX_ATTEMPTS {
+        match ClientOptions::new().open(pipe_name) {
+            Ok(client) => return Ok(client),
+            Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                last_err = Some(e);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last_err.expect("loop only exits via return or after storing an error"))
 }

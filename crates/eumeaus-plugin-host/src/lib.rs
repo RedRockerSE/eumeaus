@@ -3,13 +3,10 @@
 //! handshake, health/timeout monitoring, teardown (SPEC.md §2.2).
 //!
 //! Modeled on HashiCorp's `go-plugin`: the engine spawns a plugin binary,
-//! the plugin starts a local gRPC server on a Unix domain socket and writes
-//! the connection info to stdout as a handshake line; the host then
-//! connects as a gRPC client. See [`host`] for the handshake format.
-//!
-//! No Windows named-pipe transport yet (SPEC.md §2.2 mentions one) — this
-//! machine has no Windows target to develop or test that against, so it's
-//! left as a documented gap rather than guessed at.
+//! the plugin starts a local gRPC server — a Unix domain socket on Unix, a
+//! named pipe on Windows (SPEC.md §2.2) — and writes the connection info to
+//! stdout as a handshake line; the host then connects as a gRPC client. See
+//! [`host`] for the handshake format and both platforms' connection code.
 
 /// `credential set/list/remove` (SPEC.md §3.4) plus [`credentials::resolve_credentials`],
 /// which a scan uses to inject a plugin's requested credentials into its
