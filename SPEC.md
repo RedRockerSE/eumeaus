@@ -353,3 +353,66 @@ This single test exercises every module — engine, plugin host, protocol, persi
 6. **RESOLVED — Evidentiary export/report format.** Both, for different purposes — and both are now real: the raw case file (already tamper-evident via SQLCipher's own per-page HMAC, and portable via §8.1's `--format portable`) is the full-fidelity forensic artifact; `case export --format report`/`--format html` (JSON and, new, a self-contained HTML document — headers/tables, no external CSS/JS, print-to-PDF-able from any browser) are human/court-facing distillations of the same underlying facts. What was missing was "signed": JSON/HTML exports are plaintext with no tamper-evidence of their own (unlike the SQLCipher formats), so `case export --sign-key-file <path>` now writes a detached Ed25519 signature (`<out>.sig`) alongside any export, and `eumeaus report verify <report> --sig <file> (--trusted-key <hex> | --trust <name>)` checks it — reusing §8.2's trust store. Deliberately not built: PDF generation (a real rendering library for a benefit a browser's own print-to-PDF already covers) or any investigator-identity/key-generation system — `--sign-key-file` takes a hex private key the investigator generates and manages entirely with their own tools, same "bring your own key" philosophy as §8.2's trust store.
 7. **RESOLVED — Legal/ToS posture.** Leave entirely to the investigator — the third option this question itself named, and the same position §1's "no built-in legal-compliance guarantees" non-goal already took for lawfulness/ToS-compliance generally, now made explicit for robots.txt specifically. No code changes: the tool doesn't fetch, parse, warn on, or block against robots.txt or a site's ToS today, and that's a deliberate stance rather than an oversight — building any warn/block mechanism would be a real product/values decision (how much the tool should second-guess an investigator's own judgment call on a given site) that a v1 CLI tool for a single investigator's own use doesn't need to make on their behalf.
 8. **App/engine update mechanism.** Out of scope for v1 itself, but the Tauri GUI milestone will need an auto-update story (affects code-signing setup, which is easier to establish early). Still genuinely open — no Tauri project, GUI code, or binary-distribution pipeline exists yet, so there's nothing to update and nothing to decide against real constraints. Pointer for whoever starts that milestone: evaluate Tauri's own updater plugin first (it's the framework-native answer and likely needs the least custom code), which will still need per-platform code signing sorted out early — Apple Developer ID + notarization for macOS, an Authenticode certificate for Windows — since both are slow, identity/business-verification-gated processes worth starting well before the first GUI release is otherwise ready.
+
+---
+
+## 9. GUI (v2, Tauri) — Design
+
+Everything below is design for a *second* client of `eumeaus-engine`, alongside — not replacing — `eumeaus-cli`. Nothing in §1–§8 changes: this is additive scope, worked out before writing GUI code per this milestone's own process (a design pass first, mirroring how §1–§8 governed v1 before M0 started).
+
+### 9.1 Framework choice
+
+Tauri 2.x, per §8.8's existing pointer. Rationale, made explicit here: `eumeaus-engine` is a Rust library today (§2.1) — Tauri embeds it directly as the backend process with no FFI/IPC boundary of its own invention, unlike Electron (which would need a Node/Rust bridge) or a client-server rewrite (ruled out entirely by §1's non-goals). It also brings a framework-native updater (`tauri-plugin-updater`, §9.4) rather than a hand-rolled one. The alternative considered and rejected: a pure-Rust immediate-mode toolkit (egui/iced) avoids a web frontend entirely, but this app's real UI surface — entity/relationship tables, fact timelines, forms-heavy CRUD, a case-wide search — is exactly the kind of content-dense, text-heavy UI that HTML/CSS handles better than immediate-mode widget layout; Tauri keeps that option (an HTML/CSS/JS frontend) without giving up a Rust backend.
+
+Frontend framework: React + TypeScript, proposed but not yet locked in — largest Tauri-adjacent ecosystem and plugin compatibility, at the cost of a heavier toolchain than Svelte/vanilla. Flagged in §9.7 as the one open question in this section actually worth a second opinion before G0 starts, since it's a preference call more than an architectural one.
+
+### 9.2 Architecture — IPC boundary
+
+The GUI's Rust backend is a new crate (`eumeaus-gui` or `apps/gui/src-tauri`, workspace convention TBD at G0) that depends on `eumeaus-engine` directly — in-process, not spawned, unlike a plugin (§2.2's subprocess isolation exists for *untrusted third-party* plugin code; the GUI's own backend is first-party, same trust level as `eumeaus-cli`).
+
+Each `eumeaus-cli` subcommand (§3.4) has a corresponding `#[tauri::command]` function — the command layer is `eumeaus-gui`'s equivalent of `eumeaus-cli`'s thin-wrapper role, calling the same `Case`/engine API, not a new one. `invoke()` from the frontend is the IPC boundary; no new engine API surface should be needed for the first several milestones (§9.6) since `eumeaus-cli` already exercises the full engine surface these commands would wrap.
+
+State: `Case` owns a `rusqlite::Connection`, which is `!Sync` (`eumeaus-engine/src/scan.rs`'s own module doc explains why scans bridge this with an owned `tokio::runtime::Runtime` and `block_on`). Tauri's managed state (`tauri::State`) holds one open `Case` behind a `tokio::sync::Mutex`; concurrent command invocations serialize on it rather than each opening a second connection to the same file — consistent with §8.5's finding that a `Case` is already safe to hold open per-instance, but says nothing about two connections to *one* case file, which SQLCipher's exclusive OS file lock (CLAUDE.md) already forbids regardless of GUI or CLI.
+
+`scan run` is long-lived (worker-pool-bounded, potentially many plugin invocations) — a blocking command/response doesn't fit. Progress streams to the frontend via Tauri's event system (`emit`/`listen`), with the command returning immediately after `start_scan` and progress events carrying whatever `scan_plugin_runs` row transitions the CLI today only surfaces via `scan list` polling.
+
+### 9.3 Screens (full eventual surface, not all in one milestone — see §9.6)
+
+- Case list / create / open / close (`case list/create/open/export`)
+- Entity list and detail (facts, attributes, relationships) (`entity show`, `fact`)
+- Relationship view (table first; graph visualization is a stretch goal, not a G-milestone commitment)
+- Scan run/monitor/resume, live-updating via §9.2's event stream (`scan run/list/resume`)
+- Plugin management: list/install/verify/trust (`plugin`, `trust`)
+- Credential management (`credential set/list/remove`) — GUI's own analog of CLI's `rpassword` TTY prompt is a normal password `<input>`, not a gotcha here the way it was for CLI headless testing
+- Audit log viewer (`audit`)
+- Report export + signature verify (`case export --format report/html`, `report verify`)
+
+### 9.4 Packaging, signing, update (resolves §8.8)
+
+Builds on `.github/workflows/release.yml`'s existing pattern (§7's release infrastructure) rather than replacing it: a new workflow (or new matrix legs) using `tauri-action` to produce platform installers — `.msi`/NSIS `.exe` on Windows, `.AppImage`/`.deb` on Linux, `.dmg`/`.app` if macOS is ever in scope (§9.7).
+
+Code signing is a real, non-technical prerequisite, not just a build flag: Windows needs an Authenticode certificate (identity-verification-gated, and an EV cert — meaningfully reducing SmartScreen friction — is a real ongoing cost); macOS needs an Apple Developer ID plus notarization (Apple account + annual fee). Both are slow enough to be worth starting during G0–G1, not deferred to G6.
+
+Update mechanism: `tauri-plugin-updater` — the framework-native answer §8.8 already pointed at. It needs its own signing keypair (Tauri's built-in minisign-based update signature, a third distinct signing scheme in this project alongside §8.2's plugin-manifest Ed25519 signing and §8.6's report detached-signature Ed25519 signing — deliberately not unified, since they verify different things for different audiences) and a static manifest (`latest.json`) the app polls; GitHub Releases can serve both the manifest and the installer assets directly, the same asset-hosting path `install.sh`/`install.ps1` already use for the CLI.
+
+### 9.5 Relationship to the CLI
+
+The GUI does not deprecate or replace `eumeaus-cli` — both are first-party clients of `eumeaus-engine`, same standing §2.1 already gives the CLI. A case created by one opens fine in the other; nothing about a case's on-disk format (§4) or keychain entry is GUI- or CLI-specific.
+
+What's *not* safe, and isn't new: §4's exclusive OS file lock means the GUI and CLI (or two GUI instances) can't both hold the same `.eum` file open concurrently — an existing constraint (true since M1) that only becomes something a user might actually hit once a second program exists to collide with the first.
+
+### 9.6 Milestones (ordered, each independently verifiable — same convention as §7)
+
+- **G0 — Scaffold.** Tauri project builds and runs on Linux and Windows (matching §7's existing release matrix); one trivial command round-trips into `eumeaus-engine` (e.g. reporting its version). *Verify:* `tauri dev` opens a window; the round-trip command's result renders on screen.
+- **G1 — Case lifecycle.** Create/open/close a case from the GUI, backed by the real keychain + SQLCipher path (§4), not a mock. *Verify:* a case created in the GUI opens correctly via `eumeaus-cli case open` and vice versa.
+- **G2 — Entity/fact browsing (read-only).** List/detail views wrapping `entity show` and fact history. *Verify:* entities/facts created via CLI render correctly in the GUI with no data-shape translation bugs.
+- **G3 — Scan run + live progress.** Wraps `scan run`, using §9.2's event-stream design. *Verify:* a scan started in the GUI against the real `username-search` plugin (§M5) shows live per-plugin progress and completes with the same result set `scan list` would report via CLI.
+- **G4 — Entity/relationship editing, merge/split.** Write path, not just browsing. *Verify:* a GUI-initiated merge produces the same `audit_events` row shape §8's merge/split tests already check for CLI-initiated merges.
+- **G5 — Plugin/credential/trust management.** Screens for `plugin`, `credential`, `trust`. *Verify:* a plugin installed/trusted via GUI is usable by a CLI-initiated scan and vice versa.
+- **G6 — Packaging, signing, updater.** §9.4 in full; resolves §8.8. *Verify:* a signed installer builds in CI for each target platform; a running GUI instance detects and applies an update from a real (test) release.
+
+### 9.7 Open questions
+
+- **Frontend framework.** React+TypeScript proposed (§9.1) but not locked in — worth a second opinion before G0, since switching later is expensive in a way switching most other decisions here isn't.
+- **macOS.** The CLI's release matrix is deliberately Linux+Windows only (explicit prior decision, §7 build matrix). Untested whether `eumeaus-engine`'s `bundled-sqlcipher-vendored-openssl` build (CLAUDE.md gotcha) even succeeds on macOS — nobody has tried. Does the GUI inherit the CLI's two-platform scope, or does Tauri's native macOS support make three platforms worth it for the GUI specifically? Genuinely open, not defaulted either way.
+- **Workspace placement.** New crate(s) in the existing `crates/` workspace (consistent with every other crate in this project) vs. a separate `apps/` directory some Tauri templates default to — recommend staying inside the existing workspace for one `cargo build --workspace` to keep covering everything, but not yet decided.

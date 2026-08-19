@@ -93,33 +93,36 @@ before merge.
 
 ## Current status
 
-All of SPEC.md §7's milestones (M0–M6) are done — v1 is complete. Case
-lifecycle over real SQLCipher (M1); entity/relationship CRUD, merge/split,
-and audit trail via the CLI (M2); plugin manifest discovery,
-semver/signature validation, and real subprocess+gRPC-over-UDS
-spawn/handshake/invoke/timeout (M3); scan orchestration — worker pool, rate
-limiting, crash-safe resumability, result auto-merge (M4); a real
-Sherlock-equivalent PoC plugin, signed, checking real sites over real HTTP,
-with the full v1 proof (SPEC.md §6) passing
-(`eumeaus-cli/tests/e2e_v1_proof.rs`, M5); and OS-keychain-backed
-credential storage, injected into a plugin's request body only — never the
-case file, subprocess argv, or environment (M6). The full CLI surface from
-SPEC.md §3.4 is wired up, including `case list`/`export`, `plugin
-list`/`install`/`verify`, and `scan list` (`CLI.md` documents the two
-remaining no-op flags), plus `username-search`'s configurable `sites.toml`
-(`plugin-development` skill). SPEC.md §8.1–8.7 are resolved; only §8.8
-(deferred to the GUI milestone) remains — see §8 for details.
+All of SPEC.md §7's milestones (M0–M6) are done — the v1 CLI is complete,
+released, and public: `case`/`entity`/`relationship`/`fact` CRUD with
+merge/split and audit trail (M1–M2); real subprocess+gRPC plugin host,
+Unix socket *and* Windows named pipe transport (M3, cross-platform);
+scan orchestration with crash-safe resumability (M4); the signed
+Sherlock-equivalent `username-search` PoC plugin passing the full v1 proof
+(SPEC.md §6, M5); OS-keychain credential injection (M6). Full CLI surface
+per SPEC.md §3.4 (`CLI.md`), configurable `sites.toml`
+(`plugin-development` skill). SPEC.md §8.1–8.7 resolved; §8.8 (update
+mechanism) now has a design (§9) rather than being fully open — see below.
 
-Deviations from SPEC.md's illustrative APIs, each with a reason documented
-at the point of deviation: `Case::get_entity`/`list_attribute_records`/
-`find_entity_by_key`/`create_scan` (§3.1 gives no signatures, but `entity
-show`/`scan run --target-type/--target-value`/printing a scan id before it
-blocks need them); `RelationshipType::Custom` plus a
-`relationship_attributes` table (§4.2 only lists `entity_attributes`, but
-`add_relationship` takes `attrs` too); `eumeaus-plugin-host`'s async API and
+v0.1.0 is tagged and published at `github.com/RedRockerSE/eumeaus`
+(public repo) via `.github/workflows/release.yml` (tag push → Linux musl +
+Windows msvc archives + checksums → draft GitHub Release); `install.sh`/
+`install.ps1` fetch and checksum-verify from there. Both were end-to-end
+tested against the real published release — see `release.yml`'s Windows
+packaging step comment for the checksum-file newline bug that testing
+caught.
+
+GUI design phase started (`feat/gui-tauri` branch, SPEC.md §9): a Tauri
+2.x GUI as a second `eumeaus-engine` client alongside the CLI — screens,
+IPC boundary, packaging/signing, milestones G0–G6. Design only, no code yet.
+
+Deviations from SPEC.md's illustrative APIs, each documented at the point
+of deviation: `Case::get_entity`/`list_attribute_records`/
+`find_entity_by_key`/`create_scan` (§3.1 gives no signatures);
+`RelationshipType::Custom` + `relationship_attributes` table (§4.2 only
+lists `entity_attributes`); `eumeaus-plugin-host`'s async API and
 `Case::start_scan`'s `Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params
-(see Conventions); and the plugin signature scheme (§3.3 doesn't specify
-one — see `signature.rs`).
+(see Conventions); the plugin signature scheme (§3.3 doesn't specify one).
 
 ## Gotchas
 
@@ -133,8 +136,6 @@ one — see `signature.rs`).
   build.rs points `PROTOC` at the `protoc-bin-vendored` crate's bundled
   binary instead. Don't add a "install protoc" CI step — it's unnecessary
   and would mask a build.rs regression if the vendoring ever broke.
-- SPEC.md §8.8 (update mechanism) is the one still-open question — can't
-  be resolved before the GUI milestone exists.
 - `rusqlite` uses `bundled-sqlcipher-vendored-openssl`, not plain
   `bundled-sqlcipher` — the latter dynamically links the *build machine's*
   OpenSSL (confirmed via `ldd`), breaking release binaries on any other
