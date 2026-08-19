@@ -26,10 +26,10 @@ pub use eumeaus_plugin_protocol::{
 };
 pub use host::{PluginHandle, PluginHost};
 pub use manifest::{
-    CompatibilitySection, ContractSection, ExecutionSection, PermissionsSection, PluginManifest,
-    PluginSection,
+    check_compatibility, discover, load_file, CompatibilitySection, ContractSection,
+    ExecutionSection, PermissionsSection, PluginManifest, PluginSection,
 };
-pub use signature::{sign, TrustPolicy};
+pub use signature::{sign, verify, TrustPolicy};
 
 use std::path::PathBuf;
 use std::time::Duration;

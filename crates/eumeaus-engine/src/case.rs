@@ -16,9 +16,9 @@ use rusqlite::{params, Connection, ErrorCode};
 use uuid::Uuid;
 
 use crate::{
-    crud, keystore, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, EngineError,
-    Entity, EntityFilter, EntityId, EntityType, FactId, PluginRef, Provenance, RelationshipId,
-    RelationshipType, ScanConfig, ScanId, ScanStatus, TargetEntity,
+    crud, keystore, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, CaseSummary,
+    EngineError, Entity, EntityFilter, EntityId, EntityType, FactId, PluginRef, Provenance,
+    RelationshipId, RelationshipType, ScanConfig, ScanId, ScanStatus, ScanSummary, TargetEntity,
 };
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
@@ -172,8 +172,65 @@ impl Case {
         &mut self.conn
     }
 
-    pub fn export(&self, _dest: &Path, _format: ExportFormat) -> Result<(), EngineError> {
-        Err(EngineError::NotImplemented("Case::export"))
+    /// Lists every `.eum` file directly inside `dir` (SPEC.md §3.4 `case
+    /// list`), without opening or decrypting any of them — see
+    /// [`CaseSummary`].
+    pub fn list(dir: &Path) -> Result<Vec<CaseSummary>, EngineError> {
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(EngineError::Io(e)),
+        };
+
+        let mut summaries = Vec::new();
+        for entry in entries {
+            let path = entry?.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("eum") {
+                continue;
+            }
+            let id = match read_case_id(&path) {
+                Ok(id) => id,
+                Err(_) => {
+                    eprintln!(
+                        "warning: skipping {}: missing or invalid sidecar metadata",
+                        path.display()
+                    );
+                    continue;
+                }
+            };
+            let name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_string();
+            summaries.push(CaseSummary { path, name, id });
+        }
+        summaries.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(summaries)
+    }
+
+    /// Exports the case per `format`. `ExportFormat::Sqlite` produces a
+    /// plaintext (unencrypted) SQLite copy of the whole database via
+    /// SQLCipher's `sqlcipher_export()` — deliberately not re-encrypted
+    /// under a different scheme, since SPEC.md §8's open question 1
+    /// (case portability/handoff encryption) is still unresolved; treat the
+    /// output file as sensitive. `ExportFormat::Report` produces a
+    /// human-readable JSON dump of every entity/relationship, their
+    /// attributes, and their audit trail — a minimal stand-in for §8's open
+    /// question 6 (evidentiary report format), not a signed PDF/JSON
+    /// bundle.
+    pub fn export(&self, dest: &Path, format: ExportFormat) -> Result<(), EngineError> {
+        if dest.exists() {
+            return Err(EngineError::ExportDestinationExists(dest.to_path_buf()));
+        }
+        match format {
+            ExportFormat::Sqlite => export_sqlite(&self.conn, dest),
+            ExportFormat::Report => export_report(self, dest),
+        }
+    }
+
+    pub fn list_scans(&self) -> Result<Vec<ScanSummary>, EngineError> {
+        crate::scan::list_scans(&self.conn)
     }
 
     pub fn add_entity(
@@ -366,6 +423,113 @@ fn verify_decryption(conn: &Connection, path: &Path) -> Result<(), EngineError> 
     }
 }
 
+/// SQLCipher's built-in decrypt-and-copy primitive: attach a second,
+/// unencrypted (`KEY ''`) database at `dest` and ask SQLCipher to migrate
+/// every table into it. `dest` is passed as a bound parameter, not
+/// interpolated into the SQL text, so a path containing a quote can't break
+/// the statement.
+fn export_sqlite(conn: &Connection, dest: &Path) -> Result<(), EngineError> {
+    let dest_str = dest.to_str().ok_or_else(|| {
+        EngineError::CaseCorrupt(
+            dest.to_path_buf(),
+            "destination path is not valid UTF-8".to_string(),
+        )
+    })?;
+
+    let result: Result<(), EngineError> = (|| {
+        conn.execute(
+            "ATTACH DATABASE ?1 AS plaintext_export KEY ''",
+            params![dest_str],
+        )?;
+        conn.query_row("SELECT sqlcipher_export('plaintext_export')", [], |row| {
+            row.get::<_, Option<i64>>(0)
+        })?;
+        conn.execute("DETACH DATABASE plaintext_export", [])?;
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = conn.execute("DETACH DATABASE plaintext_export", []);
+        let _ = fs::remove_file(dest);
+    }
+    result
+}
+
+/// A JSON dump of the full entity/relationship graph, each with its
+/// attribute facts and audit trail — everything `entity show`/`audit show`
+/// can print, gathered case-wide into one file.
+fn export_report(case: &Case, dest: &Path) -> Result<(), EngineError> {
+    let attrs_json = |attrs: &[AttributeRecord]| -> serde_json::Value {
+        attrs
+            .iter()
+            .map(|a| {
+                serde_json::json!({
+                    "fact_id": a.fact_id.0.to_string(),
+                    "key": a.key,
+                    "value": a.value,
+                    "source": a.source,
+                    "collected_at_unix_ms": a.collected_at_unix_ms,
+                    "is_current": a.is_current,
+                    "conflicting": a.conflicting,
+                })
+            })
+            .collect()
+    };
+    let audit_json = |events: &[AuditEvent]| -> serde_json::Value {
+        events
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "id": e.id.to_string(),
+                    "event_type": e.event_type,
+                    "description": e.description,
+                    "actor": e.actor,
+                    "occurred_at_unix_ms": e.occurred_at_unix_ms,
+                })
+            })
+            .collect()
+    };
+
+    let mut entities_json = Vec::new();
+    for entity in crud::list_entities(&case.conn, EntityFilter::default())? {
+        let attrs = crud::list_attribute_records(&case.conn, entity.id)?;
+        let audit = crud::audit_trail(&case.conn, AuditTarget::Entity(entity.id))?;
+        entities_json.push(serde_json::json!({
+            "id": entity.id.0.to_string(),
+            "entity_type": entity.entity_type.to_string(),
+            "canonical_key": entity.canonical_key,
+            "display_label": entity.display_label,
+            "attributes": attrs_json(&attrs),
+            "audit_events": audit_json(&audit),
+        }));
+    }
+
+    let mut relationships_json = Vec::new();
+    for rel in crud::list_relationships(&case.conn)? {
+        let attrs = crud::list_relationship_attribute_records(&case.conn, rel.id)?;
+        let audit = crud::audit_trail(&case.conn, AuditTarget::Relationship(rel.id))?;
+        relationships_json.push(serde_json::json!({
+            "id": rel.id.0.to_string(),
+            "from_entity_id": rel.from.0.to_string(),
+            "to_entity_id": rel.to.0.to_string(),
+            "relationship_type": rel.relationship_type.to_string(),
+            "created_at_unix_ms": rel.created_at_unix_ms,
+            "attributes": attrs_json(&attrs),
+            "audit_events": audit_json(&audit),
+        }));
+    }
+
+    let report = serde_json::json!({
+        "case_id": case.case_id.to_string(),
+        "case_name": case.name,
+        "generated_at_unix_ms": crate::now_unix_ms(),
+        "entities": entities_json,
+        "relationships": relationships_json,
+    });
+    fs::write(dest, serde_json::to_string_pretty(&report)?)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,6 +579,111 @@ mod tests {
 
         let err = Case::open(case.path()).unwrap_err();
         assert!(matches!(err, EngineError::CaseAlreadyOpen(_)));
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn list_finds_case_files_without_opening_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Case::create(dir.path(), "alpha").unwrap();
+        let b = Case::create(dir.path(), "beta").unwrap();
+        let (a_id, b_id) = (a.id(), b.id());
+        a.close().unwrap();
+        b.close().unwrap();
+
+        let summaries = Case::list(dir.path()).unwrap();
+        assert_eq!(summaries.len(), 2, "both .eum files should be listed");
+        assert_eq!(summaries[0].name, "alpha");
+        assert_eq!(summaries[0].id, a_id);
+        assert_eq!(summaries[1].name, "beta");
+        assert_eq!(summaries[1].id, b_id);
+
+        keystore::delete_key(a_id).ok();
+        keystore::delete_key(b_id).ok();
+    }
+
+    #[test]
+    fn list_on_a_directory_with_no_cases_is_empty_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(Case::list(dir.path()).unwrap().is_empty());
+        assert!(Case::list(&dir.path().join("does-not-exist"))
+            .unwrap()
+            .is_empty());
+    }
+
+    fn test_provenance() -> Provenance {
+        Provenance {
+            source: "user".to_string(),
+            source_version: "0.1.0".to_string(),
+            source_url: None,
+            retrieval_method: None,
+            raw_response_sha256: None,
+            collected_at_unix_ms: 1000,
+        }
+    }
+
+    #[test]
+    fn export_sqlite_produces_a_plaintext_readable_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "export-sqlite").unwrap();
+        case.add_entity(
+            EntityType::Username,
+            Some("carol".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let dest = dir.path().join("export.sqlite");
+        case.export(&dest, ExportFormat::Sqlite).unwrap();
+
+        // No PRAGMA key applied — this is what a plain sqlite3 open of the
+        // exported file looks like, and it must succeed (unlike the same
+        // check against the real case file — see
+        // plain_sqlite_open_without_key_cannot_read_schema).
+        let plain = Connection::open(&dest).unwrap();
+        let count: i64 = plain
+            .query_row("SELECT count(*) FROM entities", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn export_refuses_to_overwrite_an_existing_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "export-no-overwrite").unwrap();
+        let dest = dir.path().join("already-there");
+        fs::write(&dest, b"pre-existing content").unwrap();
+
+        let err = case.export(&dest, ExportFormat::Sqlite).unwrap_err();
+        assert!(matches!(err, EngineError::ExportDestinationExists(_)));
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn export_report_writes_json_with_entities_and_relationships() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "export-report").unwrap();
+        let a = case
+            .add_entity(EntityType::Person, None, vec![], test_provenance())
+            .unwrap();
+        let b = case
+            .add_entity(EntityType::Organization, None, vec![], test_provenance())
+            .unwrap();
+        case.add_relationship(a, b, RelationshipType::MemberOf, vec![], test_provenance())
+            .unwrap();
+
+        let dest = dir.path().join("report.json");
+        case.export(&dest, ExportFormat::Report).unwrap();
+
+        let text = fs::read_to_string(&dest).unwrap();
+        let report: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(report["entities"].as_array().unwrap().len(), 2);
+        assert_eq!(report["relationships"].as_array().unwrap().len(), 1);
 
         cleanup(&case);
     }

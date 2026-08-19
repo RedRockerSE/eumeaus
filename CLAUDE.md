@@ -101,8 +101,11 @@ Sherlock-equivalent PoC plugin, signed, checking real sites over real HTTP,
 with the full v1 proof (SPEC.md §6) passing
 (`eumeaus-cli/tests/e2e_v1_proof.rs`, M5); and OS-keychain-backed
 credential storage, injected into a plugin's request body only — never the
-case file, subprocess argv, or environment (M6). SPEC.md §8's open
-questions are still open; nothing beyond v1 scope has started.
+case file, subprocess argv, or environment (M6). The full CLI surface from
+SPEC.md §3.4 is wired up, including `case list`/`export`, `plugin
+list`/`install`/`verify`, and `scan list` (`CLI.md` documents the two
+remaining no-op flags). SPEC.md §8's open questions are still open;
+nothing beyond v1 scope has started.
 
 Deviations from SPEC.md's illustrative APIs, each with a reason documented
 at the point of deviation: `Case::get_entity`/`list_attribute_records`/
@@ -130,3 +133,9 @@ one — see `signature.rs`).
 - The starter entity/relationship taxonomy (SPEC.md §4.3) and several other
   points are flagged as **open questions** in SPEC.md §8 — check there before
   assuming a data-model detail is settled.
+- `case export --format sqlite` uses SQLCipher's `sqlcipher_export()` SQL
+  function, attached to a plaintext (`KEY ''`) sidecar database — it
+  returns `NULL`, not a row count, so query it with `Option<i64>`, not
+  `i64` (`InvalidColumnType` otherwise). The output file is a real,
+  unencrypted SQLite database — no re-encryption scheme exists yet
+  (SPEC.md §8 open question 1).

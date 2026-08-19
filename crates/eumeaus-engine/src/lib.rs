@@ -8,6 +8,7 @@
 mod case;
 mod crud;
 mod keystore;
+pub mod plugins;
 mod scan;
 
 use std::path::PathBuf;
@@ -41,6 +42,8 @@ pub enum EngineError {
     Sqlite(#[from] rusqlite::Error),
     #[error("entity not found: {0}")]
     EntityNotFound(EntityId),
+    #[error("relationship not found: {0}")]
+    RelationshipNotFound(RelationshipId),
     #[error("fact {0} not found on entity {1}")]
     FactNotFound(FactId, EntityId),
     #[error("cannot merge an entity with itself: {0}")]
@@ -51,12 +54,16 @@ pub enum EngineError {
     NoCompatiblePlugins(PathBuf, String),
     #[error("plugin {0} was requested but is not a discovered, compatible plugin")]
     UnknownPlugin(String),
+    #[error("plugin {0:?} is already installed (remove its directory under --plugins-dir first)")]
+    PluginAlreadyInstalled(String),
     #[error("stored scan config is invalid: {0}")]
     InvalidScanConfig(String),
     #[error("plugin host error: {0}")]
     PluginHost(#[from] eumeaus_plugin_host::PluginError),
-    #[error("scan config serialization error: {0}")]
-    ScanConfigJson(#[from] serde_json::Error),
+    #[error("json serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("export destination already exists: {0}")]
+    ExportDestinationExists(PathBuf),
 }
 
 pub type CaseError = EngineError;
@@ -302,12 +309,45 @@ pub struct AuditEvent {
 /// same key so a viewer never mistakes "current" for "only".
 #[derive(Debug, Clone)]
 pub struct AttributeRecord {
+    /// The fact this value came from — `entity split --facts` (SPEC.md
+    /// §3.4) needs these ids and has no other way to learn them.
+    pub fact_id: FactId,
     pub key: String,
     pub value: String,
     pub source: String,
     pub collected_at_unix_ms: i64,
     pub is_current: bool,
     pub conflicting: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Relationship {
+    pub id: RelationshipId,
+    pub from: EntityId,
+    pub to: EntityId,
+    pub relationship_type: RelationshipType,
+    pub created_at_unix_ms: i64,
+}
+
+/// One `.eum` file found by [`Case::list`] — deliberately shallow (no
+/// decryption, no keychain lookup): the name comes straight from the
+/// filename (`Case::create` always writes `<name>.eum`) and the id from
+/// the plaintext `.eum.meta` sidecar, so listing cases in a directory never
+/// requires opening any of them.
+#[derive(Debug, Clone)]
+pub struct CaseSummary {
+    pub path: PathBuf,
+    pub name: String,
+    pub id: Uuid,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScanSummary {
+    pub id: ScanId,
+    pub target_entity_id: EntityId,
+    pub status: ScanStatus,
+    pub started_at_unix_ms: Option<i64>,
+    pub completed_at_unix_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone)]

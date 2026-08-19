@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use crate::{
     now_unix_ms, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, ConfidenceStatus,
-    EngineError, Entity, EntityFilter, EntityId, EntityType, FactId, Provenance, RelationshipId,
-    RelationshipType,
+    EngineError, Entity, EntityFilter, EntityId, EntityType, FactId, Provenance, Relationship,
+    RelationshipId, RelationshipType,
 };
 
 fn normalize_key(raw: &str) -> String {
@@ -44,6 +44,19 @@ fn ensure_entity_exists(conn: &Connection, id: EntityId) -> Result<(), EngineErr
         )
         .optional()?;
     found.map(|_| ()).ok_or(EngineError::EntityNotFound(id))
+}
+
+fn ensure_relationship_exists(conn: &Connection, id: RelationshipId) -> Result<(), EngineError> {
+    let found: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM relationships WHERE id = ?1",
+            params![id.0.to_string()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    found
+        .map(|_| ())
+        .ok_or(EngineError::RelationshipNotFound(id))
 }
 
 pub(crate) fn get_entity(conn: &Connection, id: EntityId) -> Result<Entity, EngineError> {
@@ -501,28 +514,38 @@ fn add_relationship_impl(
 /// All attribute facts on `id`, newest first within each key. SPEC.md
 /// §4.4: the first record per key is the "current" one; `conflicting`
 /// marks a key where facts disagree, so a viewer never mistakes "current"
-/// for "only".
-pub(crate) fn list_attribute_records(
+/// for "only". Shared by [`list_attribute_records`] (`entity_attributes`)
+/// and [`list_relationship_attribute_records`] (`relationship_attributes`)
+/// — the two tables are structurally identical (SPEC.md §4.2's
+/// `relationship_attributes` mirrors `entity_attributes`).
+fn attribute_records_from_table(
     conn: &Connection,
-    id: EntityId,
+    table: &str,
+    id_column: &str,
+    id_str: &str,
 ) -> Result<Vec<AttributeRecord>, EngineError> {
-    ensure_entity_exists(conn, id)?;
-
-    let mut stmt = conn.prepare(
-        "SELECT ea.key, ea.value, f.source, f.collected_at
-         FROM entity_attributes ea
-         JOIN facts f ON f.id = ea.fact_id
-         WHERE ea.entity_id = ?1
-         ORDER BY ea.key, f.collected_at DESC",
-    )?;
-    let rows: Vec<(String, String, String, i64)> = stmt
-        .query_map(params![id.0.to_string()], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+    let sql = format!(
+        "SELECT t.fact_id, t.key, t.value, f.source, f.collected_at
+         FROM {table} t
+         JOIN facts f ON f.id = t.fact_id
+         WHERE t.{id_column} = ?1
+         ORDER BY t.key, f.collected_at DESC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<(String, String, String, String, i64)> = stmt
+        .query_map(params![id_str], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
         })?
         .collect::<Result<_, _>>()?;
 
     let mut distinct_values: HashMap<String, HashSet<String>> = HashMap::new();
-    for (key, value, ..) in &rows {
+    for (_, key, value, ..) in &rows {
         distinct_values
             .entry(key.clone())
             .or_default()
@@ -531,10 +554,11 @@ pub(crate) fn list_attribute_records(
 
     let mut seen_current: HashSet<String> = HashSet::new();
     let mut records = Vec::with_capacity(rows.len());
-    for (key, value, source, collected_at) in rows {
+    for (fact_id, key, value, source, collected_at) in rows {
         let is_current = seen_current.insert(key.clone());
         let conflicting = distinct_values.get(&key).is_some_and(|v| v.len() > 1);
         records.push(AttributeRecord {
+            fact_id: FactId(Uuid::parse_str(&fact_id).expect("stored fact id is a valid uuid")),
             key,
             value,
             source,
@@ -544,6 +568,60 @@ pub(crate) fn list_attribute_records(
         });
     }
     Ok(records)
+}
+
+pub(crate) fn list_attribute_records(
+    conn: &Connection,
+    id: EntityId,
+) -> Result<Vec<AttributeRecord>, EngineError> {
+    ensure_entity_exists(conn, id)?;
+    attribute_records_from_table(conn, "entity_attributes", "entity_id", &id.0.to_string())
+}
+
+/// Same as [`list_attribute_records`], but for a relationship's attributes
+/// — not in SPEC.md §3.1 at all, but `case export --format report` needs a
+/// way to include them (there's no `relationship show` CLI command).
+pub(crate) fn list_relationship_attribute_records(
+    conn: &Connection,
+    id: RelationshipId,
+) -> Result<Vec<AttributeRecord>, EngineError> {
+    ensure_relationship_exists(conn, id)?;
+    attribute_records_from_table(
+        conn,
+        "relationship_attributes",
+        "relationship_id",
+        &id.0.to_string(),
+    )
+}
+
+fn relationship_from_row(row: &Row) -> rusqlite::Result<Relationship> {
+    let id: String = row.get(0)?;
+    let from: String = row.get(1)?;
+    let to: String = row.get(2)?;
+    let relationship_type: String = row.get(3)?;
+    Ok(Relationship {
+        id: RelationshipId(Uuid::parse_str(&id).expect("stored relationship id is a valid uuid")),
+        from: EntityId(Uuid::parse_str(&from).expect("stored entity id is a valid uuid")),
+        to: EntityId(Uuid::parse_str(&to).expect("stored entity id is a valid uuid")),
+        relationship_type: relationship_type
+            .parse()
+            .expect("RelationshipType::from_str is infallible"),
+        created_at_unix_ms: row.get(4)?,
+    })
+}
+
+/// Every relationship in the case, oldest first. Not in SPEC.md §3.1 (no
+/// `relationship list` CLI command exists either) — added purely for
+/// `case export --format report`, which needs the full graph.
+pub(crate) fn list_relationships(conn: &Connection) -> Result<Vec<Relationship>, EngineError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, from_entity_id, to_entity_id, relationship_type, created_at
+         FROM relationships ORDER BY created_at",
+    )?;
+    let rows = stmt
+        .query_map([], relationship_from_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 pub(crate) fn audit_trail(
@@ -960,5 +1038,84 @@ mod tests {
             "most recent by collected_at should be current"
         );
         assert!(records.iter().all(|r| r.conflicting));
+    }
+
+    #[test]
+    fn list_attribute_records_includes_the_originating_fact_id() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![attr("a", "1")],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let fact_id: String = conn
+            .query_row(
+                "SELECT id FROM facts WHERE entity_id = ?1",
+                params![id.0.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let fact_id = FactId(Uuid::parse_str(&fact_id).unwrap());
+
+        let attrs = list_attribute_records(&conn, id).unwrap();
+        assert_eq!(
+            attrs[0].fact_id, fact_id,
+            "entity split --facts needs this id, and has no other way to learn it"
+        );
+    }
+
+    #[test]
+    fn list_relationships_and_their_attribute_records() {
+        let mut conn = test_conn();
+        let a = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let b = add_entity(
+            &mut conn,
+            EntityType::Organization,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let rel_id = add_relationship(
+            &mut conn,
+            a,
+            b,
+            RelationshipType::MemberOf,
+            vec![attr("role", "engineer")],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let rels = list_relationships(&conn).unwrap();
+        assert_eq!(rels.len(), 1);
+        assert_eq!(rels[0].id, rel_id);
+        assert_eq!(rels[0].from, a);
+        assert_eq!(rels[0].to, b);
+        assert_eq!(rels[0].relationship_type, RelationshipType::MemberOf);
+
+        let attrs = list_relationship_attribute_records(&conn, rel_id).unwrap();
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].key, "role");
+        assert_eq!(attrs[0].value, "engineer");
+        assert!(attrs[0].is_current);
+    }
+
+    #[test]
+    fn list_relationship_attribute_records_errors_on_missing_relationship() {
+        let conn = test_conn();
+        let missing = RelationshipId(Uuid::new_v4());
+        let err = list_relationship_attribute_records(&conn, missing).unwrap_err();
+        assert!(matches!(err, EngineError::RelationshipNotFound(_)));
     }
 }

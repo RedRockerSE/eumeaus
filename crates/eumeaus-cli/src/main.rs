@@ -21,8 +21,6 @@ use uuid::Uuid;
 enum CliError {
     #[error(transparent)]
     Engine(#[from] EngineError),
-    #[error("not yet implemented: {0}")]
-    NotImplemented(String),
     #[error("invalid id {0:?}: {1}")]
     InvalidId(String, uuid::Error),
     #[error("specify exactly one of --entity, --relationship, --scan")]
@@ -33,6 +31,8 @@ enum CliError {
     UnknownScanTarget(String, String),
     #[error("invalid --trusted-key: {0}")]
     InvalidTrustedKey(String),
+    #[error("no plugin named {0:?} discovered in --plugins-dir")]
+    UnknownPlugin(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -89,7 +89,10 @@ enum CaseCmd {
     Open {
         path: PathBuf,
     },
-    List,
+    List {
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
     Export {
         path: PathBuf,
         #[arg(long)]
@@ -146,6 +149,14 @@ enum RelationshipCmd {
 #[derive(Subcommand)]
 enum PluginCmd {
     List {
+        /// Not in SPEC.md §3.4's illustrative surface either — every other
+        /// plugin-facing command needs to know where to look.
+        #[arg(long = "plugins-dir", default_value = "plugins")]
+        plugins_dir: PathBuf,
+        /// Both accepted but currently no-ops: there's no separate
+        /// installed-vs-available registry (v1 non-goal: no plugin
+        /// marketplace, SPEC.md §1) — `--plugins-dir` itself *is* what's
+        /// installed.
         #[arg(long)]
         installed: bool,
         #[arg(long)]
@@ -153,9 +164,15 @@ enum PluginCmd {
     },
     Install {
         path: PathBuf,
+        #[arg(long = "plugins-dir", default_value = "plugins")]
+        plugins_dir: PathBuf,
     },
     Verify {
         name: String,
+        #[arg(long = "plugins-dir", default_value = "plugins")]
+        plugins_dir: PathBuf,
+        #[arg(long = "trusted-key")]
+        trusted_key: String,
     },
 }
 
@@ -205,10 +222,6 @@ enum CredentialCmd {
     Set { name: String },
     List,
     Remove { name: String },
-}
-
-fn not_implemented(op: &str) -> Result<(), CliError> {
-    Err(CliError::NotImplemented(op.to_string()))
 }
 
 fn parse_attrs(raw: &[String]) -> Vec<Attribute> {
@@ -303,7 +316,18 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     .map_err(CliError::from)
             }
             CaseCmd::Open { path } => Case::open(&path).map(|_| ()).map_err(CliError::from),
-            CaseCmd::List => not_implemented("case list"),
+            CaseCmd::List { path } => {
+                let dir = path.unwrap_or_else(|| PathBuf::from("."));
+                for summary in Case::list(&dir)? {
+                    println!(
+                        "{}\t{}\t{}",
+                        summary.id,
+                        summary.name,
+                        summary.path.display()
+                    );
+                }
+                Ok(())
+            }
             CaseCmd::Export { path, out, format } => {
                 let case = Case::open(&path)?;
                 let format = match format.as_str() {
@@ -369,8 +393,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
                             (false, _) => " ",
                         };
                         println!(
-                            "  {flag} {} = {} (source: {}, collected_at: {})",
-                            a.key, a.value, a.source, a.collected_at_unix_ms
+                            "  {flag} {} = {} (fact: {}, source: {}, collected_at: {})",
+                            a.key, a.value, a.fact_id, a.source, a.collected_at_unix_ms
                         );
                     }
                 }
@@ -417,9 +441,41 @@ fn run(cli: Cli) -> Result<(), CliError> {
             }
         },
         Commands::Plugin(cmd) => match cmd {
-            PluginCmd::List { .. } => not_implemented("plugin list"),
-            PluginCmd::Install { .. } => not_implemented("plugin install"),
-            PluginCmd::Verify { .. } => not_implemented("plugin verify"),
+            PluginCmd::List { plugins_dir, .. } => {
+                for m in eumeaus_engine::plugins::discover(&plugins_dir)? {
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        m.plugin.name,
+                        m.plugin.version,
+                        if m.plugin.signature.is_some() {
+                            "signed"
+                        } else {
+                            "unsigned"
+                        },
+                        m.entrypoint_path().display(),
+                    );
+                }
+                Ok(())
+            }
+            PluginCmd::Install { path, plugins_dir } => {
+                let manifest = eumeaus_engine::plugins::install(&path, &plugins_dir)?;
+                println!("{} {}", manifest.plugin.name, manifest.plugin.version);
+                Ok(())
+            }
+            PluginCmd::Verify {
+                name,
+                plugins_dir,
+                trusted_key,
+            } => {
+                let manifest = eumeaus_engine::plugins::discover(&plugins_dir)?
+                    .into_iter()
+                    .find(|m| m.plugin.name == name)
+                    .ok_or_else(|| CliError::UnknownPlugin(name.clone()))?;
+                let trust_policy = parse_trust_policy(Some(&trusted_key))?;
+                eumeaus_engine::plugins::verify(&manifest, &trust_policy)?;
+                println!("valid");
+                Ok(())
+            }
         },
         Commands::Scan(cmd) => match cmd {
             ScanCmd::Run {
@@ -482,7 +538,24 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 println!("{}", case.scan_status(id)?);
                 Ok(())
             }
-            ScanCmd::List => not_implemented("scan list"),
+            ScanCmd::List => {
+                let case = require_case(&cli.case)?;
+                for s in case.list_scans()? {
+                    println!(
+                        "{}\t{}\t{}\t{}\t{}",
+                        s.id,
+                        s.status,
+                        s.target_entity_id,
+                        s.started_at_unix_ms
+                            .map(|t| t.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        s.completed_at_unix_ms
+                            .map(|t| t.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                    );
+                }
+                Ok(())
+            }
         },
         Commands::Credential(cmd) => match cmd {
             CredentialCmd::Set { name } => {

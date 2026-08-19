@@ -43,6 +43,8 @@ cargo build --workspace
 ```
 eumeaus case create <name> [--path <dir>]
 eumeaus case open <path>
+eumeaus case list [--path <dir>]
+eumeaus case export <path> --out <file> [--format sqlite|report]
 ```
 
 `create` makes `<dir>/<name>.eum` (default `--path .`) and prints nothing
@@ -50,8 +52,29 @@ on success. `open` just verifies the case can be decrypted — most of the
 time you don't call it directly, since every other command that needs a
 case opens (and closes) it for that one invocation.
 
-`case list` and `case export` are accepted but not yet implemented — see
-[Not yet implemented](#not-yet-implemented).
+`list` scans a directory (default `.`) for `.eum` files and prints
+`id  name  path` for each — it never opens or decrypts any of them (the
+name comes from the filename, the id from the plaintext `.eum.meta`
+sidecar), so it works even without keychain access.
+
+`export --format sqlite` produces a **plaintext, unencrypted** SQLite copy
+of the whole case via SQLCipher's own `sqlcipher_export()` — readable by
+plain `sqlite3`, with no key. This is not a portability/handoff encryption
+scheme (SPEC.md §8's open question 1 is still open) — treat the output
+file as sensitive, same as you would the decrypted data itself.
+`--format report` instead writes a human-readable JSON dump of every
+entity and relationship, their attributes, and their audit trail — a
+minimal stand-in for §8's open question 6 (evidentiary report format), not
+a signed PDF/JSON bundle. Both refuse to overwrite an existing `--out`.
+
+```console
+$ eumeaus case list --path .
+471698ea-b4a2-4b6d-98ef-76631dba8a75	acme-investigation	./acme-investigation.eum
+$ eumeaus case export acme-investigation.eum --out acme.sqlite --format sqlite
+$ python3 -c "import sqlite3; print(list(sqlite3.connect('acme.sqlite').execute('select entity_type, canonical_key from entities')))"
+[('Username', 'jdoe123'), ('Person', 'john doe'), ('Person', None)]
+$ eumeaus case export acme-investigation.eum --out acme-report.json --format report
+```
 
 ### `entity`
 
@@ -72,13 +95,14 @@ it's currently a no-op; only `--type` actually filters.)
   fact to the existing entity — repeat the example below with
   `--key JDOE123` and it merges into the same `jdoe123` entity.
 - `list` prints one tab-separated row per entity: `id  type  canonical_key  display_label`.
-- `show` prints the entity plus every attribute fact recorded on it, `*`
-  marking the current value per key and flagging conflicting ones (SPEC.md
-  §4.4) — see [Attribute conflicts](#attribute-conflicts).
+- `show` prints the entity plus every attribute fact recorded on it, each
+  tagged with the fact id that produced it, `*` marking the current value
+  per key and flagging conflicting ones (SPEC.md §4.4) — see
+  [Attribute conflicts](#attribute-conflicts).
 - `merge id1 id2` absorbs `id2` into `id1` and prints the survivor's id
   (always `id1`). Recorded as an audit event — see `audit show`.
-- `split` needs fact ids, which **no current command prints** — a known
-  gap (see [Not yet implemented](#not-yet-implemented)).
+- `split` needs fact ids — get them from `entity show`'s `(fact: ...)`
+  column.
 
 ```console
 $ eumeaus case create acme-investigation --path .
@@ -91,6 +115,31 @@ $ eumeaus --case acme-investigation.eum entity list
 299a704e-bc40-40c5-be5c-99f91f110f58   Username  jdoe123    jdoe123
 f8bac901-2693-45ed-ad4e-f1cf8028b195   Person    john doe   John Doe
 ```
+
+A second, separate `entity add` on the same key (e.g. `nationality` added
+in a later session) creates its own fact, independent of the first —
+`entity show` lists each attribute with the fact id that produced it,
+which `entity split --facts` then consumes directly:
+
+```console
+$ eumeaus --case acme-investigation.eum entity add --type Person --key "John Doe" --attr nationality=US
+f8bac901-2693-45ed-ad4e-f1cf8028b195
+$ eumeaus --case acme-investigation.eum entity show f8bac901-2693-45ed-ad4e-f1cf8028b195
+id:            f8bac901-2693-45ed-ad4e-f1cf8028b195
+type:          Person
+canonical_key: john doe
+label:         John Doe
+attributes:
+  * full_name = John Doe (fact: f883cb77-08cf-4db6-872a-ca164bb930c7, source: user, collected_at: 1787114078998)
+  * nationality = US (fact: 52bd0def-fe7a-45d9-8bcf-372da4e8b7a1, source: user, collected_at: 1787114079057)
+$ eumeaus --case acme-investigation.eum entity split f8bac901-2693-45ed-ad4e-f1cf8028b195 \
+    --facts 52bd0def-fe7a-45d9-8bcf-372da4e8b7a1
+b20ff1f2-d961-4839-88bf-4990059f3c4e
+```
+
+(Attributes added together in the *same* `entity add` call share one fact,
+so splitting by fact id moves them as a group — split works at fact
+granularity, not per-attribute.)
 
 ### `relationship`
 
@@ -117,6 +166,7 @@ eumeaus scan run --target-type <Type> --target-value <value>
                   [--trusted-key <hex>]
 eumeaus scan status <scan-id>
 eumeaus scan resume <scan-id>
+eumeaus scan list
 ```
 
 `--target-type`/`--target-value` name an **existing** entity by its
@@ -192,6 +242,15 @@ exist. A username that comes back "not found" or rate-limited on a given
 site produces no `OnlineAccount` row for that site at all, by design:
 absence in the graph *is* the negative/uncertain result.)
 
+`list` prints one tab-separated row per scan in the case:
+`scan_id  status  target_entity_id  started_at  completed_at` (unix ms;
+`-` if not yet set):
+
+```console
+$ eumeaus --case acme-investigation.eum scan list
+85a374c7-1aae-455d-80ac-94bbd9ec1b1a	COMPLETED	2f5b2c01-5007-49eb-a36c-eebe3b144103	1787113952865	1787113954061
+```
+
 **Signed plugins.** By default every plugin loads unsigned. Pass
 `--trusted-key <hex-encoded-32-byte-Ed25519-public-key>` to require every
 plugin in that scan to carry a valid signature against it instead (refused
@@ -200,8 +259,6 @@ a manifest's `signature` field means calling `eumeaus_plugin_host::sign`
 programmatically (see `eumeaus-plugin-host/src/signature.rs` and any
 test's `write_signed_manifest` helper for the exact pattern); wiring that
 up as a CLI subcommand is a natural next step, not yet done.
-
-`scan list` is accepted but not yet implemented.
 
 ### `credential`
 
@@ -255,8 +312,53 @@ $ eumeaus --case acme-investigation.eum audit show --entity f8bac901-2693-45ed-a
 
 ### `plugin`
 
-`plugin list`/`install`/`verify` are accepted but not yet implemented —
-manage plugins by hand in your `--plugins-dir` for now.
+```
+eumeaus plugin list [--plugins-dir <dir>] [--installed|--available]
+eumeaus plugin install <path> [--plugins-dir <dir>]
+eumeaus plugin verify <name> --trusted-key <hex> [--plugins-dir <dir>]
+```
+
+`--plugins-dir` defaults to `./plugins` for all three, same as `scan run`.
+`--installed`/`--available` are accepted but currently no-ops — there's no
+separate installed-vs-available registry (v1 non-goal: no plugin
+marketplace, SPEC.md §1), so `--plugins-dir` itself *is* what's installed.
+
+`list` prints one tab-separated row per discovered manifest:
+`name  version  signed|unsigned  entrypoint`.
+
+```console
+$ eumeaus plugin list --plugins-dir plugins
+username-search	0.1.0	unsigned	/home/magnus/Desktop/dev/eumeaus/target/debug/eumeaus-username-search-plugin
+```
+
+`install <path>` copies a plugin directory (containing `plugin.toml` and
+its entrypoint) into `<plugins-dir>/<plugin-name>/`, and prints the
+installed `name version`. Refuses to overwrite an already-installed plugin
+of the same name — remove its directory first if you want to replace it.
+
+```console
+$ eumeaus plugin install ./install-src --plugins-dir plugins2
+username-search 0.1.0
+$ eumeaus plugin install ./install-src --plugins-dir plugins2
+error: plugin "username-search" is already installed (remove its directory under --plugins-dir first)
+```
+
+`verify <name>` checks engine/protocol compatibility and, against
+`--trusted-key`, the manifest's signature — same check `scan run
+--trusted-key` performs before loading a plugin, run standalone. Prints
+`valid` on success; refuses (same errors as `scan run`) if the plugin is
+unsigned, the signature doesn't match, or `name` isn't discovered in
+`--plugins-dir`. There's no `eumeaus plugin sign` command yet — computing a
+manifest's `signature` field means calling `eumeaus_plugin_host::sign`
+programmatically (see `eumeaus-plugin-host/src/signature.rs` and any
+test's `write_signed_manifest`/`signed_manifest` helper for the exact
+pattern); wiring that up as a CLI subcommand is a natural next step, not
+yet done.
+
+```console
+$ eumeaus plugin verify username-search --plugins-dir plugins --trusted-key 0000000000000000000000000000000000000000000000000000000000000000
+error: plugin host error: plugin username-search is unsigned; refusing to load (pass --allow-unsigned for local dev)
+```
 
 ## Entity and relationship types
 
@@ -278,18 +380,20 @@ silently picking one (SPEC.md §4.4) — nothing is ever hidden.
 
 ## Not yet implemented
 
-These parse and are accepted, but currently just return an error:
+Every command in the [reference](#command-reference) above now has a real
+implementation. Two flags remain accepted-but-no-op rather than fully
+wired:
 
-| Command | Error |
+| Flag | Behavior |
 |---|---|
-| `case list` | `not yet implemented: case list` |
-| `case export` | `not yet implemented: Case::export` |
-| `plugin list` / `install` / `verify` | `not yet implemented: plugin ...` |
-| `scan list` | `not yet implemented: scan list` |
-| `entity split` | works, but no command prints the fact ids it needs |
+| `entity list --filter <expr>` | parsed but ignored; only `--type` actually filters |
+| `plugin list --installed` / `--available` | both no-ops — see the `plugin` section above |
+
+There's also no `eumeaus plugin sign` command (see the `plugin verify`
+section above) and no `case delete`/`case close` CLI command (an open
+case's OS-keychain key has no way to be removed except by hand).
 
 ## Exit codes
 
-`0` on success. Any failure — a bad argument, a not-yet-implemented
-command, an engine error — prints `error: <message>` to stderr and exits
-`1`.
+`0` on success. Any failure — a bad argument, an unknown id, an engine
+error — prints `error: <message>` to stderr and exits `1`.

@@ -274,6 +274,42 @@ pub(crate) fn resume(conn: &mut Connection, scan_id: Uuid) -> Result<(), EngineE
     Ok(())
 }
 
+type ScanRow = (String, String, String, Option<i64>, Option<i64>);
+
+/// Every scan in the case, oldest first — backs `scan list` (SPEC.md
+/// §3.4), which had no engine-level support until now.
+pub(crate) fn list_scans(conn: &Connection) -> Result<Vec<crate::ScanSummary>, EngineError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, target_entity_id, status, started_at, completed_at
+         FROM scans ORDER BY started_at",
+    )?;
+    let rows: Vec<ScanRow> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })?
+        .collect::<Result<_, _>>()?;
+
+    rows.into_iter()
+        .map(|(id, target, status, started_at, completed_at)| {
+            Ok(crate::ScanSummary {
+                id: ScanId(Uuid::parse_str(&id).expect("stored scan id is a valid uuid")),
+                target_entity_id: EntityId(
+                    Uuid::parse_str(&target).expect("stored entity id is a valid uuid"),
+                ),
+                status: status.parse()?,
+                started_at_unix_ms: started_at,
+                completed_at_unix_ms: completed_at,
+            })
+        })
+        .collect()
+}
+
 pub(crate) fn status(conn: &Connection, scan_id: Uuid) -> Result<ScanStatus, EngineError> {
     let status: String = conn
         .query_row(
@@ -845,6 +881,34 @@ default_timeout_ms = {default_timeout_ms}
             |row| row.get(0),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn list_scans_reports_the_scan_with_its_status_and_target() {
+        let base = tempfile::tempdir().unwrap();
+        let plugins_dir = base.path().join("plugins");
+        write_manifest(&plugins_dir, "scan-ok", "scan_ok", 2000);
+
+        let (mut case, target_id) = new_case_with_target(&base.path().join("case"), "list-scans");
+        let scan_id = case
+            .start_scan(
+                &plugins_dir,
+                vec![],
+                TargetEntity { id: target_id },
+                ScanConfig::default(),
+                TrustPolicy::AllowUnsigned,
+            )
+            .unwrap();
+
+        let scans = case.list_scans().unwrap();
+        assert_eq!(scans.len(), 1);
+        assert_eq!(scans[0].id, scan_id);
+        assert_eq!(scans[0].status, ScanStatus::Completed);
+        assert_eq!(scans[0].target_entity_id, target_id);
+        assert!(scans[0].started_at_unix_ms.is_some());
+        assert!(scans[0].completed_at_unix_ms.is_some());
+
+        keystore::delete_key(case.id()).ok();
     }
 
     #[test]
