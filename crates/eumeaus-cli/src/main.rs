@@ -62,6 +62,8 @@ enum Commands {
     #[command(subcommand)]
     Relationship(RelationshipCmd),
     #[command(subcommand)]
+    Fact(FactCmd),
+    #[command(subcommand)]
     Plugin(PluginCmd),
     #[command(subcommand)]
     Scan(ScanCmd),
@@ -158,6 +160,23 @@ enum RelationshipCmd {
         rel_type: String,
         #[arg(long = "attr")]
         attrs: Vec<String>,
+    },
+}
+
+/// SPEC.md §8 open question 4 (redaction), now resolved: `redact`
+/// permanently deletes a fact, leaving only a permanent `audit_events`
+/// record that it happened (see `crud::redact_fact`'s doc comment for
+/// why this is true deletion, not crypto-shredding). Fact ids come from
+/// `entity show` (or, for a relationship-backed fact, `case export
+/// --format report` — there's no `relationship show` yet).
+#[derive(Subcommand)]
+enum FactCmd {
+    Redact {
+        fact_id: String,
+        /// Why — becomes part of the permanent audit_events record, so
+        /// this is required rather than optional.
+        #[arg(long)]
+        reason: String,
     },
 }
 
@@ -323,6 +342,10 @@ fn parse_fact_ids(raw: &str) -> Result<Vec<FactId>, CliError> {
         .map(str::trim)
         .map(|id| parse_uuid(id).map(FactId))
         .collect()
+}
+
+fn parse_fact_id(raw: &str) -> Result<FactId, CliError> {
+    Ok(FactId(parse_uuid(raw)?))
 }
 
 fn now_unix_ms() -> i64 {
@@ -517,6 +540,11 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 Ok(())
             }
         },
+        Commands::Fact(FactCmd::Redact { fact_id, reason }) => {
+            let mut case = require_case(&cli.case)?;
+            case.redact_fact(parse_fact_id(&fact_id)?, default_actor(), &reason)?;
+            Ok(())
+        }
         Commands::Plugin(cmd) => match cmd {
             PluginCmd::List { plugins_dir, .. } => {
                 for m in eumeaus_engine::plugins::discover(&plugins_dir)? {

@@ -187,6 +187,50 @@ $ eumeaus --case acme-investigation.eum relationship add \
 9870690d-cbf4-4f84-8645-b919f8ccdfc6
 ```
 
+### `fact`
+
+```
+eumeaus fact redact <fact-id> --reason <text>
+```
+
+Permanently deletes a fact and its attribute row(s) — SPEC.md §8 open
+question 4, resolved as **true deletion, not crypto-shredding**: after
+redaction, the value is gone from the case file, verified by exporting
+and checking the raw bytes, not just hidden from `entity show`. What
+survives is a permanent `audit_events` row (`event_type = redact`)
+recording that a fact existed and was removed — its id, source, and
+collection time, plus your `--reason` — but never the redacted value
+itself. `--reason` is required, since it becomes the permanent record of
+*why*. Find fact ids via `entity show`'s `(fact: ...)` column (or, for a
+relationship-backed fact, `case export --format report` — there's no
+`relationship show` yet).
+
+Fact-level only: redacting every fact on an entity does **not** erase the
+entity's own `canonical_key`/`display_label` — those live on the entity
+row itself, not per-fact.
+
+```console
+$ eumeaus --case demo.eum entity show 512d6b30-686f-4408-9fe9-c4099500b00e
+id:            512d6b30-686f-4408-9fe9-c4099500b00e
+type:          Person
+canonical_key: john doe
+label:         John Doe
+attributes:
+  * full_name = John Doe (fact: d94f499a-2f6f-400a-a630-1bb64e2b23b0, source: user, collected_at: 1787120504917)
+  * ssn = 123-45-6789 (fact: 223f29bf-01ea-4c84-9535-50b360e88115, source: user, collected_at: 1787120504992)
+$ eumeaus --case demo.eum fact redact 223f29bf-01ea-4c84-9535-50b360e88115 \
+    --reason "PII, court order 2026-CV-1234"
+$ eumeaus --case demo.eum entity show 512d6b30-686f-4408-9fe9-c4099500b00e
+id:            512d6b30-686f-4408-9fe9-c4099500b00e
+type:          Person
+canonical_key: john doe
+label:         John Doe
+attributes:
+  * full_name = John Doe (fact: d94f499a-2f6f-400a-a630-1bb64e2b23b0, source: user, collected_at: 1787120504917)
+$ eumeaus --case demo.eum audit show --entity 512d6b30-686f-4408-9fe9-c4099500b00e
+1787120562597	redact	user	3bb26a79-d397-4966-8f99-a35ba6b26936	redacted fact 223f29bf-01ea-4c84-9535-50b360e88115 (source: user, collected_at: 1787120504992) — reason: PII, court order 2026-CV-1234
+```
+
 ### `scan`
 
 ```

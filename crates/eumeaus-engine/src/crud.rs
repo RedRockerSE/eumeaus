@@ -398,6 +398,75 @@ pub(crate) fn split_entity(
     Ok(EntityId(new_id))
 }
 
+/// Permanently deletes a fact and its attribute row(s) (SPEC.md §8 open
+/// question 4, now resolved): true deletion, not crypto-shredding — the
+/// `facts` table's append-only-ness exists for investigative integrity
+/// (nobody quietly rewrites history), not to make legitimate redaction
+/// impossible. What survives instead is the audit trail: a `redact` event
+/// records that a fact existed and was removed — its id, source, and
+/// collection time — plus `reason`, but never the redacted value itself
+/// (which lived only in `entity_attributes`/`relationship_attributes`,
+/// now deleted).
+///
+/// Fact-level only: the entity/relationship's own `canonical_key`/
+/// `display_label` (or `relationship_type`) are untouched, since those
+/// live on the entity/relationship row itself, not per-fact — full entity
+/// erasure is a different, larger operation this doesn't attempt.
+pub(crate) fn redact_fact(
+    conn: &mut Connection,
+    fact_id: FactId,
+    actor: Actor,
+    reason: &str,
+) -> Result<(), EngineError> {
+    let tx = conn.transaction()?;
+
+    let (entity_id, relationship_id, source, collected_at): (
+        Option<String>,
+        Option<String>,
+        String,
+        i64,
+    ) = tx
+        .query_row(
+            "SELECT entity_id, relationship_id, source, collected_at FROM facts WHERE id = ?1",
+            params![fact_id.0.to_string()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?
+        .ok_or(EngineError::UnknownFact(fact_id))?;
+
+    tx.execute(
+        "DELETE FROM entity_attributes WHERE fact_id = ?1",
+        params![fact_id.0.to_string()],
+    )?;
+    tx.execute(
+        "DELETE FROM relationship_attributes WHERE fact_id = ?1",
+        params![fact_id.0.to_string()],
+    )?;
+    tx.execute(
+        "DELETE FROM facts WHERE id = ?1",
+        params![fact_id.0.to_string()],
+    )?;
+
+    let now = now_unix_ms();
+    let description =
+        format!("redacted fact {fact_id} (source: {source}, collected_at: {collected_at}) — reason: {reason}");
+    tx.execute(
+        "INSERT INTO audit_events (id, entity_id, relationship_id, event_type, description, actor, occurred_at)
+         VALUES (?1, ?2, ?3, 'redact', ?4, ?5, ?6)",
+        params![
+            Uuid::new_v4().to_string(),
+            entity_id,
+            relationship_id,
+            description,
+            actor.name,
+            now,
+        ],
+    )?;
+
+    tx.commit()?;
+    Ok(())
+}
+
 pub(crate) fn add_relationship(
     conn: &mut Connection,
     from: EntityId,
@@ -928,6 +997,160 @@ mod tests {
 
         let err = split_entity(&mut conn, a, vec![b_fact_id], actor()).unwrap_err();
         assert!(matches!(err, EngineError::FactNotFound(_, _)));
+    }
+
+    #[test]
+    fn redact_fact_deletes_only_the_targeted_facts_attributes() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Username,
+            Some("carol".to_string()),
+            vec![attr("full_name", "Wrongly Collected")],
+            test_provenance(),
+        )
+        .unwrap();
+        // A second, separate fact on the *same* entity (same canonical
+        // key auto-merges rather than creating a new entity), which
+        // redaction must leave untouched.
+        let mut later = test_provenance();
+        later.collected_at_unix_ms = 2000;
+        add_entity(
+            &mut conn,
+            EntityType::Username,
+            Some("carol".to_string()),
+            vec![attr("nickname", "keep-me")],
+            later,
+        )
+        .unwrap();
+
+        let target_fact_id: String = conn
+            .query_row(
+                "SELECT fact_id FROM entity_attributes WHERE key = 'full_name'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let target_fact_id = FactId(Uuid::parse_str(&target_fact_id).unwrap());
+
+        redact_fact(
+            &mut conn,
+            target_fact_id,
+            actor(),
+            "wrongly collected, legal request",
+        )
+        .unwrap();
+
+        let attrs = list_attribute_records(&conn, id).unwrap();
+        assert_eq!(
+            attrs.len(),
+            1,
+            "only the untargeted fact's attribute survives"
+        );
+        assert_eq!(attrs[0].key, "nickname");
+
+        let fact_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM facts WHERE id = ?1",
+                params![target_fact_id.0.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fact_count, 0, "the redacted fact row itself must be gone");
+
+        // The entity itself survives, as a graph node.
+        let entity = get_entity(&conn, id).unwrap();
+        assert_eq!(entity.id, id);
+    }
+
+    #[test]
+    fn redact_fact_records_a_permanent_audit_event_without_leaking_the_value() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![attr("ssn", "123-45-6789")],
+            test_provenance(),
+        )
+        .unwrap();
+        let fact_id: String = conn
+            .query_row(
+                "SELECT id FROM facts WHERE entity_id = ?1",
+                params![id.0.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let fact_id = FactId(Uuid::parse_str(&fact_id).unwrap());
+
+        redact_fact(&mut conn, fact_id, actor(), "PII, court order 2026-CV-1234").unwrap();
+
+        let events = audit_trail(&conn, AuditTarget::Entity(id)).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "redact");
+        assert_eq!(events[0].actor, "tester");
+        assert!(events[0].description.contains(&fact_id.to_string()));
+        assert!(events[0].description.contains("court order 2026-CV-1234"));
+        assert!(
+            !events[0].description.contains("123-45-6789"),
+            "the redacted value itself must never appear in the audit trail: {}",
+            events[0].description
+        );
+    }
+
+    #[test]
+    fn redact_fact_works_on_a_relationship_backed_fact_too() {
+        let mut conn = test_conn();
+        let a = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let b = add_entity(
+            &mut conn,
+            EntityType::Organization,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let rel_id = add_relationship(
+            &mut conn,
+            a,
+            b,
+            RelationshipType::MemberOf,
+            vec![attr("role", "wrongly attributed")],
+            test_provenance(),
+        )
+        .unwrap();
+        let fact_id: String = conn
+            .query_row(
+                "SELECT id FROM facts WHERE relationship_id = ?1",
+                params![rel_id.0.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let fact_id = FactId(Uuid::parse_str(&fact_id).unwrap());
+
+        redact_fact(&mut conn, fact_id, actor(), "wrong attribution").unwrap();
+
+        let attrs = list_relationship_attribute_records(&conn, rel_id).unwrap();
+        assert!(attrs.is_empty());
+
+        let events = audit_trail(&conn, AuditTarget::Relationship(rel_id)).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "redact");
+    }
+
+    #[test]
+    fn redact_fact_errors_on_an_unknown_fact_id() {
+        let mut conn = test_conn();
+        let missing = FactId(Uuid::new_v4());
+        let err = redact_fact(&mut conn, missing, actor(), "n/a").unwrap_err();
+        assert!(matches!(err, EngineError::UnknownFact(_)));
     }
 
     #[test]

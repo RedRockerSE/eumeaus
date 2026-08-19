@@ -393,6 +393,15 @@ impl Case {
         crud::split_entity(&mut self.conn, id, fact_ids, actor)
     }
 
+    pub fn redact_fact(
+        &mut self,
+        fact_id: FactId,
+        actor: Actor,
+        reason: &str,
+    ) -> Result<(), EngineError> {
+        crud::redact_fact(&mut self.conn, fact_id, actor, reason)
+    }
+
     pub fn add_relationship(
         &mut self,
         from: EntityId,

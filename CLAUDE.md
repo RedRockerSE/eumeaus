@@ -40,8 +40,10 @@ before merge.
 - Workspace deps/versions/lints are centralized in the root `Cargo.toml`
   (`[workspace.dependencies]`, `[workspace.package]`); crate `Cargo.toml`
   files reference them via `foo.workspace = true`, not their own versions.
-- Facts (`facts` table) are append-only — never updated or deleted. Corrections
-  are new fact rows; merges/splits get an explicit `audit_events` row.
+- Facts (`facts` table) are append-only — never updated or silently
+  deleted; corrections are new fact rows. The one sanctioned exception is
+  `fact redact` (SPEC.md §8.4, `crud::redact_fact`): a real `DELETE`,
+  always paired with a permanent `audit_events` row recording it happened.
 - Entity auto-merge is exact `(entity_type, canonical_key)` match only (case-
   insensitive, trimmed). Never auto-merge on fuzzy similarity — that's a
   manual `entity merge` action.
@@ -106,8 +108,7 @@ SPEC.md §3.4 is wired up, including `case list`/`export`, `plugin
 list`/`install`/`verify`, and `scan list` (`CLI.md` documents the two
 remaining no-op flags), plus `username-search`'s configurable `sites.toml`
 (`plugin-development` skill). SPEC.md §8's open questions are being worked
-through one at a time; §8.1–8.3 are resolved (see §8 itself for what each
-means and for status of the rest).
+through one at a time; §8.1–8.4 are resolved (see §8 for details/rest).
 
 Deviations from SPEC.md's illustrative APIs, each with a reason documented
 at the point of deviation: `Case::get_entity`/`list_attribute_records`/
@@ -132,10 +133,9 @@ one — see `signature.rs`).
   build.rs points `PROTOC` at the `protoc-bin-vendored` crate's bundled
   binary instead. Don't add a "install protoc" CI step — it's unnecessary
   and would mask a build.rs regression if the vendoring ever broke.
-- Several data-model/policy points remain **open questions** in SPEC.md
-  §8 (redaction, multi-case concurrency, legal/ToS posture, update
-  mechanism) — check there before assuming one is settled; Current
-  status above tracks which are already resolved.
+- Several policy points remain **open questions** in SPEC.md §8 (multi-case
+  concurrency, legal/ToS posture, update mechanism) — Current status above
+  tracks what's resolved.
 - `case export`'s `sqlite`/`portable`/`Case::import` all lean on
   SQLCipher's `sqlcipher_export()` SQL function via `ATTACH DATABASE ...
   KEY ...`; it returns `NULL`, not a row count, so query it with

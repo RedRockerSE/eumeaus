@@ -47,6 +47,8 @@ pub enum EngineError {
     RelationshipNotFound(RelationshipId),
     #[error("fact {0} not found on entity {1}")]
     FactNotFound(FactId, EntityId),
+    #[error("fact not found: {0}")]
+    UnknownFact(FactId),
     #[error("cannot merge an entity with itself: {0}")]
     CannotMergeSelf(EntityId),
     #[error("scan not found: {0}")]
