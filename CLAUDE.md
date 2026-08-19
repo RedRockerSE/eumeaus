@@ -105,10 +105,9 @@ case file, subprocess argv, or environment (M6). The full CLI surface from
 SPEC.md §3.4 is wired up, including `case list`/`export`, `plugin
 list`/`install`/`verify`, and `scan list` (`CLI.md` documents the two
 remaining no-op flags), plus `username-search`'s configurable `sites.toml`
-(`plugin-development` skill). SPEC.md §8's open questions are now being
-worked through one at a time; §8.1 (case portability, via `case export
---format portable`/`case import`) and §8.2 (signing authority, via `eumeaus
-trust add/list/remove`) are resolved — see §8 itself for status of the rest.
+(`plugin-development` skill). SPEC.md §8's open questions are being worked
+through one at a time; §8.1–8.3 are resolved (see §8 itself for what each
+means and for status of the rest).
 
 Deviations from SPEC.md's illustrative APIs, each with a reason documented
 at the point of deviation: `Case::get_entity`/`list_attribute_records`/
@@ -133,9 +132,10 @@ one — see `signature.rs`).
   build.rs points `PROTOC` at the `protoc-bin-vendored` crate's bundled
   binary instead. Don't add a "install protoc" CI step — it's unnecessary
   and would mask a build.rs regression if the vendoring ever broke.
-- The starter entity/relationship taxonomy (SPEC.md §4.3) and several other
-  points are flagged as **open questions** in SPEC.md §8 — check there before
-  assuming a data-model detail is settled.
+- Several data-model/policy points remain **open questions** in SPEC.md
+  §8 (redaction, multi-case concurrency, legal/ToS posture, update
+  mechanism) — check there before assuming one is settled; Current
+  status above tracks which are already resolved.
 - `case export`'s `sqlite`/`portable`/`Case::import` all lean on
   SQLCipher's `sqlcipher_export()` SQL function via `ATTACH DATABASE ...
   KEY ...`; it returns `NULL`, not a row count, so query it with

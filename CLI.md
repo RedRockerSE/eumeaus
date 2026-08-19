@@ -482,9 +482,16 @@ escape hatch, not an error):
 
 - **Entity**: `Person`, `Username`, `Email`, `PhoneNumber`, `Domain`,
   `IPAddress`, `OnlineAccount`, `Organization`, `Location`, `Document`,
-  `Image`, `Vehicle`.
+  `Image`, `Vehicle`, `CryptoWallet`, `Url`.
 - **Relationship**: `HasAccount`, `Owns`, `AssociatedWith`, `LocatedAt`,
   `MemberOf`, `ResolvesTo`, `Mentions`, `RelatedTo`.
+
+Note the case-normalization caveat this implies: `--key`, like every other
+type's, is trimmed and lowercased for auto-merge matching (SPEC.md §4.4)
+— so two `CryptoWallet` entities whose addresses differ only by case
+auto-merge into one, and a case-sensitive `Url` path is likewise
+lowercased. Not specific to these two types; just easier to hit with
+data that's genuinely case-sensitive.
 
 ## Attribute conflicts
 

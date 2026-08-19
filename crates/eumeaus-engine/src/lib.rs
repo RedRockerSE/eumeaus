@@ -113,6 +113,13 @@ pub enum EntityType {
     Document,
     Image,
     Vehicle,
+    /// Added to the starter taxonomy (SPEC.md §4.3/§8 open question 3, now
+    /// resolved) alongside `Url` — common OSINT investigation targets that
+    /// don't map cleanly onto any existing type (a wallet isn't an
+    /// `OnlineAccount`; a bare URL of interest isn't necessarily a profile
+    /// page).
+    CryptoWallet,
+    Url,
     Custom(String),
 }
 
@@ -131,6 +138,8 @@ impl std::fmt::Display for EntityType {
             Self::Document => write!(f, "Document"),
             Self::Image => write!(f, "Image"),
             Self::Vehicle => write!(f, "Vehicle"),
+            Self::CryptoWallet => write!(f, "CryptoWallet"),
+            Self::Url => write!(f, "Url"),
             Self::Custom(s) => write!(f, "{s}"),
         }
     }
@@ -155,6 +164,8 @@ impl std::str::FromStr for EntityType {
             "Document" => Self::Document,
             "Image" => Self::Image,
             "Vehicle" => Self::Vehicle,
+            "CryptoWallet" => Self::CryptoWallet,
+            "Url" => Self::Url,
             other => Self::Custom(other.to_string()),
         })
     }
@@ -407,5 +418,47 @@ impl std::str::FromStr for ScanStatus {
                 )))
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn entity_type_round_trips_the_full_taxonomy_through_display_and_from_str() {
+        let named = [
+            EntityType::Person,
+            EntityType::Username,
+            EntityType::Email,
+            EntityType::PhoneNumber,
+            EntityType::Domain,
+            EntityType::IpAddress,
+            EntityType::OnlineAccount,
+            EntityType::Organization,
+            EntityType::Location,
+            EntityType::Document,
+            EntityType::Image,
+            EntityType::Vehicle,
+            EntityType::CryptoWallet,
+            EntityType::Url,
+        ];
+        for entity_type in named {
+            let text = entity_type.to_string();
+            assert_eq!(
+                EntityType::from_str(&text).unwrap(),
+                entity_type,
+                "{text} did not round-trip"
+            );
+        }
+    }
+
+    #[test]
+    fn entity_type_from_str_never_fails_an_unrecognized_string_falls_back_to_custom() {
+        assert_eq!(
+            EntityType::from_str("SocialMediaPost").unwrap(),
+            EntityType::Custom("SocialMediaPost".to_string())
+        );
     }
 }
