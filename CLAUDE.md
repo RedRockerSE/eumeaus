@@ -107,8 +107,8 @@ case file, subprocess argv, or environment (M6). The full CLI surface from
 SPEC.md §3.4 is wired up, including `case list`/`export`, `plugin
 list`/`install`/`verify`, and `scan list` (`CLI.md` documents the two
 remaining no-op flags), plus `username-search`'s configurable `sites.toml`
-(`plugin-development` skill). SPEC.md §8's open questions are being worked
-through one at a time; §8.1–8.6 are resolved (see §8 for details/rest).
+(`plugin-development` skill). SPEC.md §8.1–8.7 are resolved; only §8.8
+(deferred to the GUI milestone) remains — see §8 for details.
 
 Deviations from SPEC.md's illustrative APIs, each with a reason documented
 at the point of deviation: `Case::get_entity`/`list_attribute_records`/
