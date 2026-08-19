@@ -1,3 +1,7 @@
+mod case_state;
+
+use case_state::{case_close, case_create, case_current, case_list, case_open, AppState};
+
 // G0 (SPEC.md §9.6): a trivial command that genuinely round-trips into
 // eumeaus-engine, proving the workspace dependency links correctly — not
 // just a string literal echoed back. Case-backed commands start at G1.
@@ -29,7 +33,15 @@ fn list_entity_types() -> Vec<String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![list_entity_types])
+        .manage(AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            list_entity_types,
+            case_create,
+            case_open,
+            case_close,
+            case_current,
+            case_list,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
