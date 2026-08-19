@@ -33,6 +33,8 @@ enum CliError {
     InvalidTrustedKey(String),
     #[error("no plugin named {0:?} discovered in --plugins-dir")]
     UnknownPlugin(String),
+    #[error("passphrases did not match")]
+    PassphraseMismatch,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -99,6 +101,15 @@ enum CaseCmd {
         out: PathBuf,
         #[arg(long, default_value = "sqlite")]
         format: String,
+    },
+    /// Turns a `--format portable` export back into a normal local case
+    /// (SPEC.md §8 open question 1). Prompts for the passphrase
+    /// interactively, same as `credential set`.
+    Import {
+        source: PathBuf,
+        name: String,
+        #[arg(long)]
+        path: Option<PathBuf>,
     },
 }
 
@@ -306,6 +317,21 @@ fn require_case(case: &Option<PathBuf>) -> Result<Case, CliError> {
     Case::open(&path).map_err(CliError::from)
 }
 
+/// Prompts twice (entry + confirmation), same shape as most software's
+/// "set a new password" flow — catches a typo before it locks the
+/// passphrase into an export nobody can read back. `case import` only
+/// prompts once (`rpassword::prompt_password` directly): there, a wrong
+/// entry just fails to decrypt and can be retried, so a second prompt
+/// would only add friction.
+fn prompt_new_passphrase(prompt: &str) -> Result<String, CliError> {
+    let first = rpassword::prompt_password(format!("{prompt}: "))?;
+    let confirm = rpassword::prompt_password("Confirm passphrase: ")?;
+    if first != confirm {
+        return Err(CliError::PassphraseMismatch);
+    }
+    Ok(first)
+}
+
 fn run(cli: Cli) -> Result<(), CliError> {
     match cli.command {
         Commands::Case(cmd) => match cmd {
@@ -332,9 +358,20 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 let case = Case::open(&path)?;
                 let format = match format.as_str() {
                     "report" => ExportFormat::Report,
+                    "portable" => ExportFormat::Portable(prompt_new_passphrase(
+                        "Passphrase to protect this export",
+                    )?),
                     _ => ExportFormat::Sqlite,
                 };
                 case.export(&out, format).map_err(CliError::from)
+            }
+            CaseCmd::Import { source, name, path } => {
+                let dir = path.unwrap_or_else(|| PathBuf::from("."));
+                let passphrase =
+                    rpassword::prompt_password(format!("Passphrase for {}: ", source.display()))?;
+                Case::import(&source, &passphrase, &dir, &name)
+                    .map(|_| ())
+                    .map_err(CliError::from)
             }
         },
         Commands::Entity(cmd) => match cmd {

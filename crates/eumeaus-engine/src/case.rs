@@ -25,8 +25,17 @@ const SCHEMA_SQL: &str = include_str!("schema.sql");
 const SCHEMA_VERSION: &str = "1";
 
 pub enum ExportFormat {
+    /// Plaintext (unencrypted) SQLite copy — no key needed to read it back,
+    /// so treat the output as sensitive. Documented at [`Case::export`].
     Sqlite,
+    /// Human-readable JSON dump of the entity/relationship graph. See
+    /// [`Case::export`].
     Report,
+    /// A SQLCipher copy re-keyed with a passphrase instead of the local
+    /// keychain key (SPEC.md §8 open question 1) — meant to be handed to
+    /// another investigator/machine and turned back into a normal case via
+    /// [`Case::import`]. The `String` is the passphrase; must be non-empty.
+    Portable(String),
 }
 
 /// Opaque handle over an open, decrypted case DB connection + exclusive
@@ -211,22 +220,145 @@ impl Case {
 
     /// Exports the case per `format`. `ExportFormat::Sqlite` produces a
     /// plaintext (unencrypted) SQLite copy of the whole database via
-    /// SQLCipher's `sqlcipher_export()` — deliberately not re-encrypted
-    /// under a different scheme, since SPEC.md §8's open question 1
-    /// (case portability/handoff encryption) is still unresolved; treat the
-    /// output file as sensitive. `ExportFormat::Report` produces a
+    /// SQLCipher's `sqlcipher_export()` — treat the output file as
+    /// sensitive; it is *not* a portability/handoff mechanism (that's
+    /// `ExportFormat::Portable`, below). `ExportFormat::Report` produces a
     /// human-readable JSON dump of every entity/relationship, their
-    /// attributes, and their audit trail — a minimal stand-in for §8's open
-    /// question 6 (evidentiary report format), not a signed PDF/JSON
-    /// bundle.
+    /// attributes, and their audit trail — a minimal stand-in for SPEC.md
+    /// §8's open question 6 (evidentiary report format), not a signed
+    /// PDF/JSON bundle. `ExportFormat::Portable` answers §8's open question
+    /// 1: it produces a SQLCipher file re-keyed with the given passphrase
+    /// (SQLCipher's own passphrase mode — PBKDF2 over the passphrase, a
+    /// random salt stored in the file header; no hand-rolled KDF here) —
+    /// safe to hand to another investigator/machine, who turns it back
+    /// into a normal local case with [`Case::import`].
     pub fn export(&self, dest: &Path, format: ExportFormat) -> Result<(), EngineError> {
         if dest.exists() {
             return Err(EngineError::ExportDestinationExists(dest.to_path_buf()));
         }
         match format {
-            ExportFormat::Sqlite => export_sqlite(&self.conn, dest),
+            ExportFormat::Sqlite => export_sqlite(&self.conn, dest, ""),
             ExportFormat::Report => export_report(self, dest),
+            ExportFormat::Portable(passphrase) => {
+                if passphrase.is_empty() {
+                    return Err(EngineError::EmptyPassphrase);
+                }
+                export_sqlite(&self.conn, dest, &passphrase)
+            }
         }
+    }
+
+    /// Imports a portable export (`ExportFormat::Portable`) back into a
+    /// normal local case: decrypts `source` with `passphrase`, then
+    /// re-encrypts it under a brand-new random key generated and stored in
+    /// *this* machine's OS keychain — the same shape as [`Case::create`]
+    /// (fresh UUID, fresh key, fresh `.eum.meta` sidecar), rather than
+    /// teaching [`Case::open`] to understand two different key sources.
+    /// From the moment this returns, the result is an entirely ordinary
+    /// case; `source`'s passphrase is never needed again.
+    pub fn import(
+        source: &Path,
+        passphrase: &str,
+        dest_dir: &Path,
+        name: &str,
+    ) -> Result<Case, EngineError> {
+        if passphrase.is_empty() {
+            return Err(EngineError::EmptyPassphrase);
+        }
+        if !source.exists() {
+            return Err(EngineError::CaseNotFound(source.to_path_buf()));
+        }
+
+        fs::create_dir_all(dest_dir)?;
+        let dest_path = dest_dir.join(format!("{name}.eum"));
+        if dest_path.exists() {
+            return Err(EngineError::CaseAlreadyExists(dest_path));
+        }
+
+        let case_id = Uuid::new_v4();
+        let hex_key = keystore::create_key(case_id)?;
+
+        match Self::import_impl(source, passphrase, &dest_path, case_id, name, &hex_key) {
+            Ok(case) => Ok(case),
+            Err(err) => {
+                let _ = fs::remove_file(&dest_path);
+                let _ = fs::remove_file(meta_path_for(&dest_path));
+                let _ = keystore::delete_key(case_id);
+                Err(err)
+            }
+        }
+    }
+
+    fn import_impl(
+        source: &Path,
+        passphrase: &str,
+        dest_path: &Path,
+        case_id: Uuid,
+        name: &str,
+        hex_key: &str,
+    ) -> Result<Case, EngineError> {
+        let lock = lock_exclusive(dest_path)?;
+        let dest_str = dest_path.to_str().ok_or_else(|| {
+            EngineError::CaseCorrupt(
+                dest_path.to_path_buf(),
+                "destination path is not valid UTF-8".to_string(),
+            )
+        })?;
+
+        {
+            // `PRAGMA key` doesn't reliably accept a bound parameter (it's
+            // parsed differently from a normal expression position), so the
+            // passphrase is escaped and interpolated instead — standard SQL
+            // string-literal escaping (doubling an embedded `'`) is
+            // sufficient and correct here, there's no other special
+            // character in a single-quoted SQL string literal.
+            let source_conn = Connection::open(source)?;
+            let escaped_passphrase = passphrase.replace('\'', "''");
+            source_conn.execute_batch(&format!("PRAGMA key = '{escaped_passphrase}'"))?;
+            verify_decryption(&source_conn, source)?;
+
+            // Unlike the passphrase above, the destination's key is the
+            // keychain's raw hex key — same `x'<hex>'` raw-key syntax
+            // `apply_key` uses elsewhere, so a later `Case::open` decrypts
+            // this file the normal way. That syntax only works as a
+            // literal in the SQL text (not as a bound parameter's runtime
+            // value), but `hex_key` is always exactly 64 lowercase hex
+            // digits from `keystore::create_key`, so interpolating it here
+            // carries no injection risk.
+            source_conn.execute(
+                &format!("ATTACH DATABASE ?1 AS import_target KEY \"x'{hex_key}'\""),
+                params![dest_str],
+            )?;
+            source_conn.query_row("SELECT sqlcipher_export('import_target')", [], |row| {
+                row.get::<_, Option<i64>>(0)
+            })?;
+            source_conn.execute("DETACH DATABASE import_target", [])?;
+        }
+
+        // sqlcipher_export copied the portable file's *original*
+        // case_meta rows (its old case_id/name) verbatim — re-point them
+        // at this machine's actual new identity so case_meta agrees with
+        // the sidecar/keychain UUID Case::open relies on.
+        let conn = Connection::open(dest_path)?;
+        apply_key(&conn, hex_key)?;
+        conn.execute(
+            "UPDATE case_meta SET value = ?1 WHERE key = 'case_id'",
+            params![case_id.to_string()],
+        )?;
+        conn.execute(
+            "UPDATE case_meta SET value = ?1 WHERE key = 'name'",
+            params![name],
+        )?;
+
+        fs::write(meta_path_for(dest_path), case_id.to_string())?;
+
+        Ok(Case {
+            path: dest_path.to_path_buf(),
+            case_id,
+            name: name.to_string(),
+            conn,
+            _lock: lock,
+        })
     }
 
     pub fn list_scans(&self) -> Result<Vec<ScanSummary>, EngineError> {
@@ -423,12 +555,16 @@ fn verify_decryption(conn: &Connection, path: &Path) -> Result<(), EngineError> 
     }
 }
 
-/// SQLCipher's built-in decrypt-and-copy primitive: attach a second,
-/// unencrypted (`KEY ''`) database at `dest` and ask SQLCipher to migrate
-/// every table into it. `dest` is passed as a bound parameter, not
-/// interpolated into the SQL text, so a path containing a quote can't break
-/// the statement.
-fn export_sqlite(conn: &Connection, dest: &Path) -> Result<(), EngineError> {
+/// SQLCipher's built-in decrypt-and-copy primitive: attach a second
+/// database at `dest`, keyed with `key`, and ask SQLCipher to migrate
+/// every table into it. `key = ""` means unencrypted (`ExportFormat::Sqlite`);
+/// any other value is used as a SQLCipher passphrase (`ExportFormat::Portable`)
+/// — unlike the keychain's raw hex key (see `import_impl`), a plain
+/// passphrase has no special SQL syntax to preserve, so both it and `dest`
+/// are passed as bound parameters rather than interpolated into the SQL
+/// text — neither a path nor a passphrase containing a quote can break the
+/// statement.
+fn export_sqlite(conn: &Connection, dest: &Path, key: &str) -> Result<(), EngineError> {
     let dest_str = dest.to_str().ok_or_else(|| {
         EngineError::CaseCorrupt(
             dest.to_path_buf(),
@@ -438,18 +574,18 @@ fn export_sqlite(conn: &Connection, dest: &Path) -> Result<(), EngineError> {
 
     let result: Result<(), EngineError> = (|| {
         conn.execute(
-            "ATTACH DATABASE ?1 AS plaintext_export KEY ''",
-            params![dest_str],
+            "ATTACH DATABASE ?1 AS export_target KEY ?2",
+            params![dest_str, key],
         )?;
-        conn.query_row("SELECT sqlcipher_export('plaintext_export')", [], |row| {
+        conn.query_row("SELECT sqlcipher_export('export_target')", [], |row| {
             row.get::<_, Option<i64>>(0)
         })?;
-        conn.execute("DETACH DATABASE plaintext_export", [])?;
+        conn.execute("DETACH DATABASE export_target", [])?;
         Ok(())
     })();
 
     if result.is_err() {
-        let _ = conn.execute("DETACH DATABASE plaintext_export", []);
+        let _ = conn.execute("DETACH DATABASE export_target", []);
         let _ = fs::remove_file(dest);
     }
     result
@@ -685,6 +821,184 @@ mod tests {
         assert_eq!(report["entities"].as_array().unwrap().len(), 2);
         assert_eq!(report["relationships"].as_array().unwrap().len(), 1);
 
+        cleanup(&case);
+    }
+
+    #[test]
+    fn export_portable_refuses_an_empty_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "portable-empty-passphrase").unwrap();
+        let dest = dir.path().join("export.eumx");
+
+        let err = case
+            .export(&dest, ExportFormat::Portable(String::new()))
+            .unwrap_err();
+        assert!(matches!(err, EngineError::EmptyPassphrase));
+        assert!(!dest.exists(), "no partial file should be left behind");
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn export_portable_produces_a_sqlcipher_file_unreadable_without_the_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "portable-unreadable").unwrap();
+        let dest = dir.path().join("export.eumx");
+
+        case.export(
+            &dest,
+            ExportFormat::Portable("correct horse battery staple".to_string()),
+        )
+        .unwrap();
+
+        // Same shape as plain_sqlite_open_without_key_cannot_read_schema:
+        // no key applied at all.
+        let unkeyed = Connection::open(&dest).unwrap();
+        assert!(
+            unkeyed
+                .query_row("SELECT count(*) FROM sqlite_master", [], |row| row
+                    .get::<_, i64>(0))
+                .is_err(),
+            "a portable export must not be readable without its passphrase"
+        );
+
+        // Wrong passphrase must fail the same way a wrong raw key does.
+        let wrong_key = Connection::open(&dest).unwrap();
+        wrong_key
+            .execute_batch("PRAGMA key = 'not the passphrase'")
+            .unwrap();
+        assert!(
+            wrong_key
+                .query_row("SELECT count(*) FROM sqlite_master", [], |row| row
+                    .get::<_, i64>(0))
+                .is_err(),
+            "a wrong passphrase must not decrypt a portable export"
+        );
+
+        // The right passphrase does work.
+        let right_key = Connection::open(&dest).unwrap();
+        right_key
+            .execute_batch("PRAGMA key = 'correct horse battery staple'")
+            .unwrap();
+        right_key
+            .query_row("SELECT count(*) FROM sqlite_master", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("the correct passphrase must decrypt a portable export");
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn import_round_trips_a_portable_export_into_a_normal_independent_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut original = Case::create(&dir.path().join("original"), "orig").unwrap();
+        original
+            .add_entity(
+                EntityType::Username,
+                Some("carol".to_string()),
+                vec![],
+                test_provenance(),
+            )
+            .unwrap();
+        let original_id = original.id();
+
+        let portable = dir.path().join("handoff.eumx");
+        original
+            .export(&portable, ExportFormat::Portable("swordfish".to_string()))
+            .unwrap();
+
+        let imported_dir = dir.path().join("imported");
+        let mut imported =
+            Case::import(&portable, "swordfish", &imported_dir, "imported-case").unwrap();
+
+        // A fresh identity, not the original's.
+        assert_ne!(imported.id(), original_id);
+        assert_eq!(imported.name(), "imported-case");
+
+        // The data made the trip.
+        let entities = imported
+            .list_entities(EntityFilter {
+                entity_type: Some(EntityType::Username),
+            })
+            .unwrap();
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].canonical_key.as_deref(), Some("carol"));
+
+        // The imported case is fully independent: normal CRUD, its own
+        // keychain entry, closable and reopenable like any other case.
+        imported
+            .add_entity(EntityType::Person, None, vec![], test_provenance())
+            .unwrap();
+        let imported_path = imported.path().to_path_buf();
+        let imported_id = imported.id();
+        imported.close().unwrap();
+        let reopened = Case::open(&imported_path).unwrap();
+        assert_eq!(reopened.id(), imported_id);
+
+        keystore::delete_key(imported_id).ok();
+        cleanup(&original);
+    }
+
+    #[test]
+    fn import_rejects_the_wrong_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "import-wrong-passphrase").unwrap();
+        let portable = dir.path().join("handoff.eumx");
+        case.export(&portable, ExportFormat::Portable("right-one".to_string()))
+            .unwrap();
+
+        let err = Case::import(
+            &portable,
+            "wrong-one",
+            &dir.path().join("imported"),
+            "imported",
+        )
+        .unwrap_err();
+        assert!(matches!(err, EngineError::CaseCorrupt(_, _)));
+        assert!(
+            !dir.path().join("imported").join("imported.eum").exists(),
+            "a failed import must not leave a partial case file behind"
+        );
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn import_refuses_an_empty_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = Case::import(
+            &dir.path().join("does-not-matter.eumx"),
+            "",
+            &dir.path().join("imported"),
+            "imported",
+        )
+        .unwrap_err();
+        assert!(matches!(err, EngineError::EmptyPassphrase));
+    }
+
+    #[test]
+    fn import_refuses_to_overwrite_an_existing_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "import-no-overwrite").unwrap();
+        let portable = dir.path().join("handoff.eumx");
+        case.export(&portable, ExportFormat::Portable("pw".to_string()))
+            .unwrap();
+
+        let existing = Case::create(&dir.path().join("imported"), "already-here").unwrap();
+        let existing_id = existing.id();
+        existing.close().unwrap();
+
+        let err = Case::import(
+            &portable,
+            "pw",
+            &dir.path().join("imported"),
+            "already-here",
+        )
+        .unwrap_err();
+        assert!(matches!(err, EngineError::CaseAlreadyExists(_)));
+
+        keystore::delete_key(existing_id).ok();
         cleanup(&case);
     }
 

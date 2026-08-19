@@ -64,6 +64,8 @@ pub enum EngineError {
     Json(#[from] serde_json::Error),
     #[error("export destination already exists: {0}")]
     ExportDestinationExists(PathBuf),
+    #[error("a passphrase is required for a portable export/import (SPEC.md §8 open question 1)")]
+    EmptyPassphrase,
 }
 
 pub type CaseError = EngineError;

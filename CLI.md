@@ -44,7 +44,8 @@ cargo build --workspace
 eumeaus case create <name> [--path <dir>]
 eumeaus case open <path>
 eumeaus case list [--path <dir>]
-eumeaus case export <path> --out <file> [--format sqlite|report]
+eumeaus case export <path> --out <file> [--format sqlite|report|portable]
+eumeaus case import <source> <name> [--path <dir>]
 ```
 
 `create` makes `<dir>/<name>.eum` (default `--path .`) and prints nothing
@@ -59,13 +60,13 @@ sidecar), so it works even without keychain access.
 
 `export --format sqlite` produces a **plaintext, unencrypted** SQLite copy
 of the whole case via SQLCipher's own `sqlcipher_export()` — readable by
-plain `sqlite3`, with no key. This is not a portability/handoff encryption
-scheme (SPEC.md §8's open question 1 is still open) — treat the output
-file as sensitive, same as you would the decrypted data itself.
-`--format report` instead writes a human-readable JSON dump of every
-entity and relationship, their attributes, and their audit trail — a
-minimal stand-in for §8's open question 6 (evidentiary report format), not
-a signed PDF/JSON bundle. Both refuse to overwrite an existing `--out`.
+plain `sqlite3`, with no key. Treat the output file as sensitive, same as
+you would the decrypted data itself; this is *not* the handoff mechanism
+(see `--format portable`, below). `--format report` instead writes a
+human-readable JSON dump of every entity and relationship, their
+attributes, and their audit trail — a minimal stand-in for SPEC.md §8's
+open question 6 (evidentiary report format), not a signed PDF/JSON
+bundle. All three refuse to overwrite an existing `--out`.
 
 ```console
 $ eumeaus case list --path .
@@ -75,6 +76,35 @@ $ python3 -c "import sqlite3; print(list(sqlite3.connect('acme.sqlite').execute(
 [('Username', 'jdoe123'), ('Person', 'john doe'), ('Person', None)]
 $ eumeaus case export acme-investigation.eum --out acme-report.json --format report
 ```
+
+**Handing off a case to another investigator/machine** (SPEC.md §8 open
+question 1, now resolved): `export --format portable` produces a *still
+SQLCipher-encrypted* copy, re-keyed with a passphrase you supply
+interactively (entered twice, to catch typos) instead of this machine's
+keychain key — safe to copy or email, unlike `--format sqlite`. The
+receiving machine turns it back into a completely ordinary local case
+with `case import`: it prompts once for the passphrase, decrypts, and
+generates a **fresh** UUID/keychain key for the new case — the imported
+case shares no identity with the original beyond its data; from then on
+it's `case open`ed normally like anything else.
+
+```console
+$ eumeaus case export acme-investigation.eum --out handoff.eumx --format portable
+Passphrase to protect this export: 
+Confirm passphrase: 
+$ eumeaus case import handoff.eumx recovered --path ./imported
+Passphrase for handoff.eumx: 
+$ eumeaus case list --path ./imported
+18b6182f-0e2b-420b-a93b-73414afd6650	recovered	./imported/recovered.eum
+$ eumeaus --case ./imported/recovered.eum entity list
+ca12dbec-f0df-4d4e-8262-01059341359b	Username	torvalds	torvalds
+```
+
+A wrong passphrase on `import` fails the same way a corrupt/tampered case
+file does (`case file ... is corrupt or tampered: SQLCipher key was
+rejected, or the file is corrupt/tampered`) and leaves no partial case
+file behind. A plugin's `--trusted-key` signature has nothing to do with
+any of this — it covers a *plugin's* name/version/binary, never case data.
 
 ### `entity`
 

@@ -104,8 +104,11 @@ credential storage, injected into a plugin's request body only — never the
 case file, subprocess argv, or environment (M6). The full CLI surface from
 SPEC.md §3.4 is wired up, including `case list`/`export`, `plugin
 list`/`install`/`verify`, and `scan list` (`CLI.md` documents the two
-remaining no-op flags). SPEC.md §8's open questions are still open;
-nothing beyond v1 scope has started.
+remaining no-op flags), plus `username-search`'s configurable `sites.toml`
+(`plugin-development` skill). SPEC.md §8's open questions are now being
+worked through one at a time; §8.1 (case portability) is resolved via
+`case export --format portable`/`case import` — see §8 itself for status
+of the rest.
 
 Deviations from SPEC.md's illustrative APIs, each with a reason documented
 at the point of deviation: `Case::get_entity`/`list_attribute_records`/
@@ -133,9 +136,14 @@ one — see `signature.rs`).
 - The starter entity/relationship taxonomy (SPEC.md §4.3) and several other
   points are flagged as **open questions** in SPEC.md §8 — check there before
   assuming a data-model detail is settled.
-- `case export --format sqlite` uses SQLCipher's `sqlcipher_export()` SQL
-  function, attached to a plaintext (`KEY ''`) sidecar database — it
-  returns `NULL`, not a row count, so query it with `Option<i64>`, not
-  `i64` (`InvalidColumnType` otherwise). The output file is a real,
-  unencrypted SQLite database — no re-encryption scheme exists yet
-  (SPEC.md §8 open question 1).
+- `case export`'s `sqlite`/`portable`/`Case::import` all lean on
+  SQLCipher's `sqlcipher_export()` SQL function via `ATTACH DATABASE ...
+  KEY ...`; it returns `NULL`, not a row count, so query it with
+  `Option<i64>`, not `i64` (`InvalidColumnType` otherwise). Its `KEY`
+  clause takes two different forms that are *not* interchangeable: a
+  passphrase (`ExportFormat::Portable`) is a plain string, safe as a bound
+  parameter; the keychain's raw hex key (everywhere else, incl.
+  `Case::import`'s destination) needs the literal `x'<hex>'` blob syntax,
+  which only SQLite/SQLCipher recognizes when it's actually written in the
+  SQL text — a bound parameter holding that same string is just parsed as
+  a (wrong) passphrase, not a raw key.
