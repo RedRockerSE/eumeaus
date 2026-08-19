@@ -364,7 +364,7 @@ Everything below is design for a *second* client of `eumeaus-engine`, alongside 
 
 Tauri 2.x, per §8.8's existing pointer. Rationale, made explicit here: `eumeaus-engine` is a Rust library today (§2.1) — Tauri embeds it directly as the backend process with no FFI/IPC boundary of its own invention, unlike Electron (which would need a Node/Rust bridge) or a client-server rewrite (ruled out entirely by §1's non-goals). It also brings a framework-native updater (`tauri-plugin-updater`, §9.4) rather than a hand-rolled one. The alternative considered and rejected: a pure-Rust immediate-mode toolkit (egui/iced) avoids a web frontend entirely, but this app's real UI surface — entity/relationship tables, fact timelines, forms-heavy CRUD, a case-wide search — is exactly the kind of content-dense, text-heavy UI that HTML/CSS handles better than immediate-mode widget layout; Tauri keeps that option (an HTML/CSS/JS frontend) without giving up a Rust backend.
 
-Frontend framework: React + TypeScript, proposed but not yet locked in — largest Tauri-adjacent ecosystem and plugin compatibility, at the cost of a heavier toolchain than Svelte/vanilla. Flagged in §9.7 as the one open question in this section actually worth a second opinion before G0 starts, since it's a preference call more than an architectural one.
+Frontend framework: **React + TypeScript**, confirmed — largest Tauri-adjacent ecosystem and plugin compatibility, at the cost of a heavier toolchain than Svelte/vanilla.
 
 ### 9.2 Architecture — IPC boundary
 
@@ -389,9 +389,9 @@ State: `Case` owns a `rusqlite::Connection`, which is `!Sync` (`eumeaus-engine/s
 
 ### 9.4 Packaging, signing, update (resolves §8.8)
 
-Builds on `.github/workflows/release.yml`'s existing pattern (§7's release infrastructure) rather than replacing it: a new workflow (or new matrix legs) using `tauri-action` to produce platform installers — `.msi`/NSIS `.exe` on Windows, `.AppImage`/`.deb` on Linux, `.dmg`/`.app` if macOS is ever in scope (§9.7).
+Builds on `.github/workflows/release.yml`'s existing pattern (§7's release infrastructure) rather than replacing it: a new workflow (or new matrix legs) using `tauri-action` to produce platform installers — `.msi`/NSIS `.exe` on Windows, `.AppImage`/`.deb` on Linux. macOS is out of scope for now (§9.7) — no `.dmg`/`.app` target, and no Apple Developer ID/notarization to set up.
 
-Code signing is a real, non-technical prerequisite, not just a build flag: Windows needs an Authenticode certificate (identity-verification-gated, and an EV cert — meaningfully reducing SmartScreen friction — is a real ongoing cost); macOS needs an Apple Developer ID plus notarization (Apple account + annual fee). Both are slow enough to be worth starting during G0–G1, not deferred to G6.
+Code signing is a real, non-technical prerequisite, not just a build flag: Windows needs an Authenticode certificate (identity-verification-gated, and an EV cert — meaningfully reducing SmartScreen friction — is a real ongoing cost). Slow enough to be worth starting during G0–G1, not deferred to G6.
 
 Update mechanism: `tauri-plugin-updater` — the framework-native answer §8.8 already pointed at. It needs its own signing keypair (Tauri's built-in minisign-based update signature, a third distinct signing scheme in this project alongside §8.2's plugin-manifest Ed25519 signing and §8.6's report detached-signature Ed25519 signing — deliberately not unified, since they verify different things for different audiences) and a static manifest (`latest.json`) the app polls; GitHub Releases can serve both the manifest and the installer assets directly, the same asset-hosting path `install.sh`/`install.ps1` already use for the CLI.
 
@@ -413,6 +413,6 @@ What's *not* safe, and isn't new: §4's exclusive OS file lock means the GUI and
 
 ### 9.7 Open questions
 
-- **Frontend framework.** React+TypeScript proposed (§9.1) but not locked in — worth a second opinion before G0, since switching later is expensive in a way switching most other decisions here isn't.
-- **macOS.** The CLI's release matrix is deliberately Linux+Windows only (explicit prior decision, §7 build matrix). Untested whether `eumeaus-engine`'s `bundled-sqlcipher-vendored-openssl` build (CLAUDE.md gotcha) even succeeds on macOS — nobody has tried. Does the GUI inherit the CLI's two-platform scope, or does Tauri's native macOS support make three platforms worth it for the GUI specifically? Genuinely open, not defaulted either way.
+- **RESOLVED — Frontend framework.** React + TypeScript (§9.1).
+- **RESOLVED — macOS.** Dropped for now — the GUI inherits the CLI's existing Linux+Windows-only release matrix (§7) rather than adding a third platform. Revisit if demand shows up; `eumeaus-engine`'s `bundled-sqlcipher-vendored-openssl` build has never been tried on macOS at all, so this also sidesteps an unknown.
 - **Workspace placement.** New crate(s) in the existing `crates/` workspace (consistent with every other crate in this project) vs. a separate `apps/` directory some Tauri templates default to — recommend staying inside the existing workspace for one `cargo build --workspace` to keep covering everything, but not yet decided.
