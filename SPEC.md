@@ -415,4 +415,4 @@ What's *not* safe, and isn't new: §4's exclusive OS file lock means the GUI and
 
 - **RESOLVED — Frontend framework.** React + TypeScript (§9.1).
 - **RESOLVED — macOS.** Dropped for now — the GUI inherits the CLI's existing Linux+Windows-only release matrix (§7) rather than adding a third platform. Revisit if demand shows up; `eumeaus-engine`'s `bundled-sqlcipher-vendored-openssl` build has never been tried on macOS at all, so this also sidesteps an unknown.
-- **Workspace placement.** New crate(s) in the existing `crates/` workspace (consistent with every other crate in this project) vs. a separate `apps/` directory some Tauri templates default to — recommend staying inside the existing workspace for one `cargo build --workspace` to keep covering everything, but not yet decided.
+- **RESOLVED — Workspace placement.** Inside the existing `crates/` workspace, not a separate `apps/` directory — `crates/eumeaus-gui/` holds the frontend (React+TS, Vite) at its root and the Tauri Rust backend in `crates/eumeaus-gui/src-tauri/` (a normal workspace member), so `cargo build --workspace` keeps covering it like every other crate.

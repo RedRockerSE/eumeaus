@@ -7,6 +7,7 @@ members = [
     "crates/eumeaus-plugin-sdk",
     "crates/eumeaus-username-search-plugin",
     "crates/eumeaus-cli",
+    "crates/eumeaus-gui/src-tauri",
 ]
 
 [workspace.package]

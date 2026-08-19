@@ -34,6 +34,10 @@ before merge.
 - `crates/eumeaus-cli` — thin CLI wrapper over the engine API; also the
   end-to-end test surface (`crates/eumeaus-cli/tests/`), including the v1
   proof (`e2e_v1_proof.rs`, SPEC.md §6).
+- `crates/eumeaus-gui` — Tauri 2.x + React/TS GUI (SPEC.md §9, v2, not v1
+  scope). Frontend at the crate root; the Rust/Tauri side and its own
+  `Cargo.toml` are in `src-tauri/` (the actual workspace member), a thin
+  `#[tauri::command]` wrapper over the engine API like the CLI is.
 
 ## Conventions
 
@@ -66,13 +70,10 @@ before merge.
   test-fixture-as-Cargo-example pattern all live there, not here.
 - Credentials (`eumeaus-plugin-host/src/credentials.rs`) live in a
   *separate* OS-keychain service (`"eumeaus-credentials"`) from case
-  encryption keys (`"eumeaus"`, in `keystore.rs`), and are global to the OS
-  user account, not scoped to a case — `credential set/list/remove` take
-  no `--case`. Injected into a plugin's `CheckRequest.resolved_credentials`
-  by `resolve_credentials`, resolved synchronously *before* entering the
-  scan's tokio runtime (same reason as the async `check()` gotcha in the
-  `plugin-development` skill). A missing credential a plugin declared
-  needing marks just that plugin's run `ERROR`, not the whole scan.
+  encryption keys (`"eumeaus"`, `keystore.rs`), global to the OS user, not
+  scoped to a case. Injected into `CheckRequest.resolved_credentials`
+  synchronously before the scan's tokio runtime starts; a missing declared
+  credential marks just that plugin's run `ERROR`, not the whole scan.
 - `credential set`'s interactive prompt (`rpassword`) needs a real TTY —
   it refuses to read a plain pipe on purpose. Not reproducible in a
   headless/CI test without a pty-emulation dependency; the underlying
@@ -94,27 +95,20 @@ before merge.
 ## Current status
 
 All of SPEC.md §7's milestones (M0–M6) are done — the v1 CLI is complete,
-released, and public: `case`/`entity`/`relationship`/`fact` CRUD with
-merge/split and audit trail (M1–M2); real subprocess+gRPC plugin host,
-Unix socket *and* Windows named pipe transport (M3, cross-platform);
-scan orchestration with crash-safe resumability (M4); the signed
-Sherlock-equivalent `username-search` PoC plugin passing the full v1 proof
-(SPEC.md §6, M5); OS-keychain credential injection (M6). Full CLI surface
-per SPEC.md §3.4 (`CLI.md`), configurable `sites.toml`
-(`plugin-development` skill). SPEC.md §8.1–8.7 resolved; §8.8 (update
-mechanism) now has a design (§9) rather than being fully open — see below.
+released, and public (`CLI.md` is the full command reference). SPEC.md
+§8.1–8.7 resolved; §8.8 (update mechanism) now has a design (§9).
 
-v0.1.0 is tagged and published at `github.com/RedRockerSE/eumeaus`
-(public repo) via `.github/workflows/release.yml` (tag push → Linux musl +
-Windows msvc archives + checksums → draft GitHub Release); `install.sh`/
-`install.ps1` fetch and checksum-verify from there. Both were end-to-end
-tested against the real published release — see `release.yml`'s Windows
-packaging step comment for the checksum-file newline bug that testing
-caught.
+v0.1.0 is tagged and published (public repo) via
+`.github/workflows/release.yml` (tag push → Linux musl + Windows msvc
+archives + checksums → draft GitHub Release); `install.sh`/`install.ps1`
+fetch and verify from there — both tested end-to-end against the real
+release, which caught a real checksum-file newline bug (see
+`release.yml`'s Windows packaging step comment).
 
-GUI design phase started (`feat/gui-tauri` branch, SPEC.md §9): a Tauri
-2.x GUI as a second `eumeaus-engine` client alongside the CLI — screens,
-IPC boundary, packaging/signing, milestones G0–G6. Design only, no code yet.
+GUI (SPEC.md §9, `feat/gui-tauri` branch): design resolved (Tauri 2.x,
+React+TS, Linux+Windows only, `crates/` workspace). G0 scaffold
+(`eumeaus-gui`) in progress — blocked locally on a missing system dep,
+see Gotchas.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/
@@ -140,11 +134,16 @@ lists `entity_attributes`); `eumeaus-plugin-host`'s async API and
   `bundled-sqlcipher` — the latter dynamically links the *build machine's*
   OpenSSL (confirmed via `ldd`), breaking release binaries on any other
   machine. Don't "simplify" this back.
-- `case export`'s `sqlite`/`portable`/`Case::import` all lean on
-  SQLCipher's `sqlcipher_export()` via `ATTACH DATABASE ... KEY ...`; it
-  returns `NULL`, not a row count (`Option<i64>`, not `i64`). Its `KEY`
-  clause takes two *non-interchangeable* forms: a passphrase
-  (`ExportFormat::Portable`) is a plain string, safe as a bound parameter;
-  the keychain's raw hex key needs the literal `x'<hex>'` blob syntax,
-  which only SQLite recognizes written directly in the SQL text — a bound
-  parameter with that same string is just parsed as a wrong passphrase.
+- `case export`'s `sqlite`/`portable`/`Case::import` lean on SQLCipher's
+  `sqlcipher_export()` (`ATTACH DATABASE ... KEY ...`); it returns `NULL`,
+  not a row count (`Option<i64>`). Its `KEY` clause differs by source: a
+  passphrase (`Portable`) binds as a normal parameter, but the keychain's
+  raw hex key needs literal `x'<hex>'` blob syntax written directly in the
+  SQL — a bound parameter there just parses as a wrong passphrase.
+- `eumeaus-gui`'s Rust side (`src-tauri`) won't even `cargo check` on
+  Linux without real system dev headers first (`libwebkit2gtk-4.1-dev`,
+  `libsoup-3.0-dev`, `libjavascriptcoregtk-4.1-dev`, `libayatana-
+  appindicator3-dev`, `librsvg2-dev`, `libxdo-dev` — `libwebkit2gtk-4.1-dev`
+  pulls most of these in transitively via apt). Not vendorable/cross-
+  checkable the way Windows-target `cargo check` is (CLAUDE.md's rusqlite
+  gotcha) — this is the *host's own* native linking, no target trick helps.
