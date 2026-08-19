@@ -19,6 +19,12 @@ pub mod credentials;
 mod host;
 mod manifest;
 mod signature;
+/// `trust add/list/remove` (SPEC.md §8 open question 2): a local, plain-file
+/// store of named Ed25519 public keys the investigator has explicitly
+/// chosen to trust — not the OS keychain `credentials` uses, since these
+/// aren't secrets. See the module doc for why v1 has no baked-in
+/// "official" key.
+pub mod trust_store;
 
 pub use eumeaus_plugin_protocol::{
     CheckRequest, CheckResult, ConfidenceStatus, EntityFinding, Provenance, RateLimitConfig,
@@ -68,4 +74,6 @@ pub enum PluginError {
         "plugin {1} requires credential {0:?}, which is not set (use `eumeaus credential set {0}`)"
     )]
     MissingCredential(String, String),
+    #[error("trust store error: {0}")]
+    TrustStore(String),
 }

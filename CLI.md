@@ -328,11 +328,15 @@ $ eumeaus --case acme-investigation.eum scan list
 **Signed plugins.** By default every plugin loads unsigned. Pass
 `--trusted-key <hex-encoded-32-byte-Ed25519-public-key>` to require every
 plugin in that scan to carry a valid signature against it instead (refused
-otherwise). There's currently no `eumeaus plugin sign` command — computing
-a manifest's `signature` field means calling `eumeaus_plugin_host::sign`
-programmatically (see `eumeaus-plugin-host/src/signature.rs` and any
-test's `write_signed_manifest` helper for the exact pattern); wiring that
-up as a CLI subcommand is a natural next step, not yet done.
+otherwise) — or `--trust <name>`, naming a key already added via `eumeaus
+trust add` (see the [`trust`](#trust) section below), so you don't have to
+paste the same 64 hex characters into every `scan run`/`plugin verify`.
+The two flags are mutually exclusive. There's currently no `eumeaus plugin
+sign` command — computing a manifest's `signature` field means calling
+`eumeaus_plugin_host::sign` programmatically (see
+`eumeaus-plugin-host/src/signature.rs` and any test's
+`write_signed_manifest` helper for the exact pattern); wiring that up as a
+CLI subcommand is a natural next step, not yet done.
 
 ### `credential`
 
@@ -389,7 +393,7 @@ $ eumeaus --case acme-investigation.eum audit show --entity f8bac901-2693-45ed-a
 ```
 eumeaus plugin list [--plugins-dir <dir>] [--installed|--available]
 eumeaus plugin install <path> [--plugins-dir <dir>]
-eumeaus plugin verify <name> --trusted-key <hex> [--plugins-dir <dir>]
+eumeaus plugin verify <name> (--trusted-key <hex> | --trust <name>) [--plugins-dir <dir>]
 ```
 
 `--plugins-dir` defaults to `./plugins` for all three, same as `scan run`.
@@ -418,20 +422,57 @@ error: plugin "username-search" is already installed (remove its directory under
 ```
 
 `verify <name>` checks engine/protocol compatibility and, against
-`--trusted-key`, the manifest's signature — same check `scan run
---trusted-key` performs before loading a plugin, run standalone. Prints
-`valid` on success; refuses (same errors as `scan run`) if the plugin is
-unsigned, the signature doesn't match, or `name` isn't discovered in
-`--plugins-dir`. There's no `eumeaus plugin sign` command yet — computing a
-manifest's `signature` field means calling `eumeaus_plugin_host::sign`
-programmatically (see `eumeaus-plugin-host/src/signature.rs` and any
-test's `write_signed_manifest`/`signed_manifest` helper for the exact
-pattern); wiring that up as a CLI subcommand is a natural next step, not
-yet done.
+`--trusted-key`/`--trust`, the manifest's signature — same check `scan
+run` performs before loading a plugin, run standalone. Exactly one of
+`--trusted-key`/`--trust` is required (there's nothing to verify against
+otherwise). Prints `valid` on success; refuses (same errors as `scan run`)
+if the plugin is unsigned, the signature doesn't match, or `name` isn't
+discovered in `--plugins-dir`. There's no `eumeaus plugin sign` command
+yet — computing a manifest's `signature` field means calling
+`eumeaus_plugin_host::sign` programmatically (see
+`eumeaus-plugin-host/src/signature.rs` and any test's
+`write_signed_manifest`/`signed_manifest` helper for the exact pattern);
+wiring that up as a CLI subcommand is a natural next step, not yet done.
 
 ```console
 $ eumeaus plugin verify username-search --plugins-dir plugins --trusted-key 0000000000000000000000000000000000000000000000000000000000000000
 error: plugin host error: plugin username-search is unsigned; refusing to load (pass --allow-unsigned for local dev)
+```
+
+### `trust`
+
+```
+eumeaus trust add <name> <public-key>
+eumeaus trust list
+eumeaus trust remove <name>
+```
+
+A local store of named Ed25519 public keys (SPEC.md §8 open question 2) —
+`<public-key>` is the same 64-hex-character format `--trusted-key` takes.
+Global to your OS user account, like `credential`, but a **plain file**
+(`$XDG_CONFIG_HOME/eumeaus/trusted_keys.toml`, or the platform equivalent
+— not the OS keychain: public keys aren't secrets), so listing or editing
+it needs no keyring access. `add` validates the key (64 hex chars, a
+genuine point on the curve) before storing it, so a typo is caught
+immediately rather than surfacing later as a confusing signature failure;
+re-adding an existing name overwrites it. `remove` on a name that was
+never added is not an error. There is deliberately no baked-in "official"
+first-party key — see SPEC.md §8.2: the investigator decides what to
+trust, one `trust add` at a time.
+
+```console
+$ eumeaus trust add my-first-party-key 31e89b0b44a7ecbc01c42bf2369312c01e93b5da8cdecf582c03199a5fcac14a
+$ eumeaus trust list
+my-first-party-key	31e89b0b44a7ecbc01c42bf2369312c01e93b5da8cdecf582c03199a5fcac14a
+$ eumeaus --case acme-investigation.eum scan run \
+    --plugins-dir plugins --target-type Username --target-value torvalds \
+    --trust my-first-party-key
+08672852-ebaf-4159-975c-d23905e2406b
+$ eumeaus trust remove my-first-party-key
+$ eumeaus --case acme-investigation.eum scan run \
+    --plugins-dir plugins --target-type Username --target-value torvalds \
+    --trust my-first-party-key
+error: plugin host error: trust store error: no trusted key named "my-first-party-key" (see `eumeaus trust list`)
 ```
 
 ## Entity and relationship types

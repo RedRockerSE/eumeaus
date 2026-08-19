@@ -35,6 +35,8 @@ enum CliError {
     UnknownPlugin(String),
     #[error("passphrases did not match")]
     PassphraseMismatch,
+    #[error("nothing to verify against — pass --trusted-key <hex> or --trust <name>")]
+    MissingTrust,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -67,6 +69,8 @@ enum Commands {
     Credential(CredentialCmd),
     #[command(subcommand)]
     Audit(AuditCmd),
+    #[command(subcommand)]
+    Trust(TrustCmd),
 }
 
 #[derive(Subcommand)]
@@ -182,8 +186,12 @@ enum PluginCmd {
         name: String,
         #[arg(long = "plugins-dir", default_value = "plugins")]
         plugins_dir: PathBuf,
-        #[arg(long = "trusted-key")]
-        trusted_key: String,
+        /// Exactly one of --trusted-key/--trust is required — there's
+        /// nothing to verify a signature against otherwise.
+        #[arg(long = "trusted-key", conflicts_with = "trust")]
+        trusted_key: Option<String>,
+        #[arg(long)]
+        trust: Option<String>,
     },
 }
 
@@ -214,10 +222,15 @@ enum ScanCmd {
         /// Hex-encoded 32-byte Ed25519 public key. If given, every plugin
         /// in this scan must carry a valid signature against it (refused
         /// otherwise); if omitted, plugins load unsigned. Also not in
-        /// SPEC.md §3.4 — there's no credential/trust-store config yet
-        /// (M6+) for the CLI to read a default trust key from.
-        #[arg(long = "trusted-key")]
+        /// SPEC.md §3.4 — there's no credential config for the CLI to read
+        /// a default trust key from. Mutually exclusive with `--trust`.
+        #[arg(long = "trusted-key", conflicts_with = "trust")]
         trusted_key: Option<String>,
+        /// Same as `--trusted-key`, but naming a key already added via
+        /// `eumeaus trust add` (SPEC.md §8 open question 2) instead of
+        /// spelling out the hex every time.
+        #[arg(long)]
+        trust: Option<String>,
     },
     Status {
         scan_id: String,
@@ -235,6 +248,22 @@ enum CredentialCmd {
     Remove { name: String },
 }
 
+/// The local trust store (SPEC.md §8 open question 2): named Ed25519
+/// public keys `scan run --trust <name>`/`plugin verify --trust <name>`
+/// can reference instead of a raw `--trusted-key <hex>` every time.
+#[derive(Subcommand)]
+enum TrustCmd {
+    Add {
+        name: String,
+        /// Hex-encoded 32-byte Ed25519 public key.
+        public_key: String,
+    },
+    List,
+    Remove {
+        name: String,
+    },
+}
+
 fn parse_attrs(raw: &[String]) -> Vec<Attribute> {
     raw.iter()
         .filter_map(|kv| kv.split_once('='))
@@ -249,12 +278,7 @@ fn parse_uuid(raw: &str) -> Result<Uuid, CliError> {
     Uuid::parse_str(raw).map_err(|e| CliError::InvalidId(raw.to_string(), e))
 }
 
-/// `--trusted-key`: hex-encoded 32-byte Ed25519 public key, or absent for
-/// `TrustPolicy::AllowUnsigned`.
-fn parse_trust_policy(hex_key: Option<&str>) -> Result<eumeaus_engine::TrustPolicy, CliError> {
-    let Some(hex_key) = hex_key else {
-        return Ok(eumeaus_engine::TrustPolicy::AllowUnsigned);
-    };
+fn parse_hex_key(hex_key: &str) -> Result<ed25519_dalek::VerifyingKey, CliError> {
     if hex_key.len() != 64 {
         return Err(CliError::InvalidTrustedKey(
             "must be exactly 64 hex characters (32 bytes)".to_string(),
@@ -265,8 +289,24 @@ fn parse_trust_policy(hex_key: Option<&str>) -> Result<eumeaus_engine::TrustPoli
         *byte = u8::from_str_radix(&hex_key[i * 2..i * 2 + 2], 16)
             .map_err(|e| CliError::InvalidTrustedKey(e.to_string()))?;
     }
-    let trusted_key = ed25519_dalek::VerifyingKey::from_bytes(&bytes)
-        .map_err(|e| CliError::InvalidTrustedKey(e.to_string()))?;
+    ed25519_dalek::VerifyingKey::from_bytes(&bytes)
+        .map_err(|e| CliError::InvalidTrustedKey(e.to_string()))
+}
+
+/// `--trusted-key <hex>` and `--trust <name>` (looked up in the local
+/// trust store, SPEC.md §8 open question 2) are two ways to name the same
+/// thing — clap's `conflicts_with` rejects passing both before this ever
+/// runs. Neither given means `TrustPolicy::AllowUnsigned`.
+fn parse_trust_policy(
+    hex_key: Option<&str>,
+    trust_name: Option<&str>,
+) -> Result<eumeaus_engine::TrustPolicy, CliError> {
+    let trusted_key = match (hex_key, trust_name) {
+        (Some(hex_key), None) => parse_hex_key(hex_key)?,
+        (None, Some(name)) => eumeaus_engine::trust::resolve(name)?,
+        (None, None) => return Ok(eumeaus_engine::TrustPolicy::AllowUnsigned),
+        (Some(_), Some(_)) => unreachable!("clap's conflicts_with rules this out"),
+    };
     Ok(eumeaus_engine::TrustPolicy::RequireSignature { trusted_key })
 }
 
@@ -503,12 +543,16 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 name,
                 plugins_dir,
                 trusted_key,
+                trust,
             } => {
+                if trusted_key.is_none() && trust.is_none() {
+                    return Err(CliError::MissingTrust);
+                }
                 let manifest = eumeaus_engine::plugins::discover(&plugins_dir)?
                     .into_iter()
                     .find(|m| m.plugin.name == name)
                     .ok_or_else(|| CliError::UnknownPlugin(name.clone()))?;
-                let trust_policy = parse_trust_policy(Some(&trusted_key))?;
+                let trust_policy = parse_trust_policy(trusted_key.as_deref(), trust.as_deref())?;
                 eumeaus_engine::plugins::verify(&manifest, &trust_policy)?;
                 println!("valid");
                 Ok(())
@@ -524,6 +568,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 proxy,
                 worker_pool,
                 trusted_key,
+                trust,
             } => {
                 let mut case = require_case(&cli.case)?;
                 let entity_type = EntityType::from_str(&target_type).expect("infallible");
@@ -536,7 +581,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     .into_iter()
                     .map(|name| eumeaus_engine::PluginRef { name })
                     .collect();
-                let trust_policy = parse_trust_policy(trusted_key.as_deref())?;
+                let trust_policy = parse_trust_policy(trusted_key.as_deref(), trust.as_deref())?;
                 // create_scan (not start_scan) so the id prints before the
                 // scan blocks — this may run for a while, and a caller
                 // watching the terminal (or `scan status`ing from another
@@ -635,6 +680,22 @@ fn run(cli: Cli) -> Result<(), CliError> {
             }
             Ok(())
         }
+        Commands::Trust(cmd) => match cmd {
+            TrustCmd::Add { name, public_key } => {
+                eumeaus_engine::trust::add(&name, &public_key)?;
+                Ok(())
+            }
+            TrustCmd::List => {
+                for key in eumeaus_engine::trust::list()? {
+                    println!("{}\t{}", key.name, key.public_key);
+                }
+                Ok(())
+            }
+            TrustCmd::Remove { name } => {
+                eumeaus_engine::trust::remove(&name)?;
+                Ok(())
+            }
+        },
     }
 }
 

@@ -10,6 +10,7 @@ mod crud;
 mod keystore;
 pub mod plugins;
 mod scan;
+pub mod trust;
 
 use std::path::PathBuf;
 

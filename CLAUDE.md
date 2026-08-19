@@ -106,9 +106,9 @@ SPEC.md §3.4 is wired up, including `case list`/`export`, `plugin
 list`/`install`/`verify`, and `scan list` (`CLI.md` documents the two
 remaining no-op flags), plus `username-search`'s configurable `sites.toml`
 (`plugin-development` skill). SPEC.md §8's open questions are now being
-worked through one at a time; §8.1 (case portability) is resolved via
-`case export --format portable`/`case import` — see §8 itself for status
-of the rest.
+worked through one at a time; §8.1 (case portability, via `case export
+--format portable`/`case import`) and §8.2 (signing authority, via `eumeaus
+trust add/list/remove`) are resolved — see §8 itself for status of the rest.
 
 Deviations from SPEC.md's illustrative APIs, each with a reason documented
 at the point of deviation: `Case::get_entity`/`list_attribute_records`/

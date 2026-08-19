@@ -40,6 +40,9 @@ tower = "0.4.7"
 hyper-util = "0.1.20"
 toml = "1.1.4"
 semver = "1.0.28"
+# Local trust store (SPEC.md §8 open question 2) — resolves the OS config
+# directory for trusted_keys.toml.
+dirs = "5.0.1"
 sha2 = "0.10.9"
 base64 = "0.23.1"
 ed25519-dalek = "2.1.1"

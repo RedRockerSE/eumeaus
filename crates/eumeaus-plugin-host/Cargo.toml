@@ -16,6 +16,7 @@ semver.workspace = true
 sha2.workspace = true
 base64.workspace = true
 ed25519-dalek = { workspace = true, features = ["rand_core"] }
+dirs.workspace = true
 tempfile = "3.13.0"
 tonic.workspace = true
 tower.workspace = true
