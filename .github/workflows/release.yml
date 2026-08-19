@@ -101,8 +101,12 @@ jobs:
           # property), not concatenation - ${stage} disambiguates.
           $zipName = "${stage}.zip"
           Compress-Archive -Path $stage -DestinationPath $zipName
+          # No -NoNewline: sha256sum's own output always ends in a
+          # newline, and the release job's `cat dist/*.sha256 >
+          # checksums.txt` relies on that to keep entries on separate
+          # lines when concatenating this file with the Linux one.
           $hash = (Get-FileHash $zipName -Algorithm SHA256).Hash.ToLower()
-          "$hash  $zipName" | Out-File "${zipName}.sha256" -Encoding ascii -NoNewline
+          "$hash  $zipName" | Out-File "${zipName}.sha256" -Encoding ascii
 
       - uses: actions/upload-artifact@v4
         with:
