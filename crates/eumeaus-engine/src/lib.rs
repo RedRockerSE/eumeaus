@@ -9,6 +9,7 @@ mod case;
 mod crud;
 mod keystore;
 pub mod plugins;
+pub mod report;
 mod scan;
 pub mod trust;
 

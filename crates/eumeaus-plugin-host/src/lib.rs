@@ -16,6 +16,12 @@
 /// `CheckRequest` — see the module doc for why credentials never touch
 /// the case file, subprocess argv, or environment variables.
 pub mod credentials;
+/// Generic Ed25519 sign/verify over arbitrary bytes (SPEC.md §8 open
+/// question 6) — the same primitive `signature` uses for plugin
+/// manifests, generalized for `case export --sign-key-file`/`report
+/// verify`. See the module doc for why the investigator brings their own
+/// key rather than this tool generating/custodying one.
+pub mod detached_signature;
 mod host;
 mod manifest;
 mod signature;

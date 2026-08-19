@@ -73,6 +73,8 @@ enum Commands {
     Audit(AuditCmd),
     #[command(subcommand)]
     Trust(TrustCmd),
+    #[command(subcommand)]
+    Report(ReportCmd),
 }
 
 #[derive(Subcommand)]
@@ -107,6 +109,14 @@ enum CaseCmd {
         out: PathBuf,
         #[arg(long, default_value = "sqlite")]
         format: String,
+        /// Path to a file containing a hex-encoded 32-byte Ed25519 private
+        /// key (SPEC.md §8 open question 6) — signs the export, writing a
+        /// detached signature to `<out>.sig` and printing the signer's
+        /// public key. Most useful for --format report/html, which
+        /// (unlike sqlite/portable) have no tamper-evidence of their own;
+        /// this tool never generates or stores this key for you.
+        #[arg(long = "sign-key-file")]
+        sign_key_file: Option<PathBuf>,
     },
     /// Turns a `--format portable` export back into a normal local case
     /// (SPEC.md §8 open question 1). Prompts for the passphrase
@@ -283,6 +293,23 @@ enum TrustCmd {
     },
 }
 
+/// Verifies a detached signature written by `case export --sign-key-file`
+/// (SPEC.md §8 open question 6). Doesn't need `--case` — the report and
+/// its `.sig` are standalone files, possibly handed off entirely
+/// separately from the case that produced them.
+#[derive(Subcommand)]
+enum ReportCmd {
+    Verify {
+        report: PathBuf,
+        #[arg(long)]
+        sig: PathBuf,
+        #[arg(long = "trusted-key", conflicts_with = "trust")]
+        trusted_key: Option<String>,
+        #[arg(long)]
+        trust: Option<String>,
+    },
+}
+
 fn parse_attrs(raw: &[String]) -> Vec<Attribute> {
     raw.iter()
         .filter_map(|kv| kv.split_once('='))
@@ -417,16 +444,29 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 }
                 Ok(())
             }
-            CaseCmd::Export { path, out, format } => {
+            CaseCmd::Export {
+                path,
+                out,
+                format,
+                sign_key_file,
+            } => {
                 let case = Case::open(&path)?;
                 let format = match format.as_str() {
                     "report" => ExportFormat::Report,
+                    "html" => ExportFormat::Html,
                     "portable" => ExportFormat::Portable(prompt_new_passphrase(
                         "Passphrase to protect this export",
                     )?),
                     _ => ExportFormat::Sqlite,
                 };
-                case.export(&out, format).map_err(CliError::from)
+                case.export(&out, format)?;
+                if let Some(sign_key_file) = sign_key_file {
+                    let signing_key_hex = std::fs::read_to_string(&sign_key_file)?;
+                    let (_sig_path, public_key_hex) =
+                        eumeaus_engine::report::sign_export(&out, &signing_key_hex)?;
+                    println!("{public_key_hex}");
+                }
+                Ok(())
             }
             CaseCmd::Import { source, name, path } => {
                 let dir = path.unwrap_or_else(|| PathBuf::from("."));
@@ -724,6 +764,22 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 Ok(())
             }
         },
+        Commands::Report(ReportCmd::Verify {
+            report,
+            sig,
+            trusted_key,
+            trust,
+        }) => {
+            let trusted_key = match (trusted_key.as_deref(), trust.as_deref()) {
+                (Some(hex_key), None) => parse_hex_key(hex_key)?,
+                (None, Some(name)) => eumeaus_engine::trust::resolve(name)?,
+                (None, None) => return Err(CliError::MissingTrust),
+                (Some(_), Some(_)) => unreachable!("clap's conflicts_with rules this out"),
+            };
+            eumeaus_engine::report::verify_report(&report, &sig, trusted_key)?;
+            println!("valid");
+            Ok(())
+        }
     }
 }
 

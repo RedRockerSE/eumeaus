@@ -36,6 +36,11 @@ pub enum ExportFormat {
     /// another investigator/machine and turned back into a normal case via
     /// [`Case::import`]. The `String` is the passphrase; must be non-empty.
     Portable(String),
+    /// Self-contained HTML dump of the same data `Report` covers, styled
+    /// for a human reader rather than machine parsing (SPEC.md §8 open
+    /// question 6) — openable in any browser, print-to-PDF-able from
+    /// there. See [`Case::export`].
+    Html,
 }
 
 /// Opaque handle over an open, decrypted case DB connection + exclusive
@@ -222,16 +227,18 @@ impl Case {
     /// plaintext (unencrypted) SQLite copy of the whole database via
     /// SQLCipher's `sqlcipher_export()` — treat the output file as
     /// sensitive; it is *not* a portability/handoff mechanism (that's
-    /// `ExportFormat::Portable`, below). `ExportFormat::Report` produces a
-    /// human-readable JSON dump of every entity/relationship, their
-    /// attributes, and their audit trail — a minimal stand-in for SPEC.md
-    /// §8's open question 6 (evidentiary report format), not a signed
-    /// PDF/JSON bundle. `ExportFormat::Portable` answers §8's open question
-    /// 1: it produces a SQLCipher file re-keyed with the given passphrase
-    /// (SQLCipher's own passphrase mode — PBKDF2 over the passphrase, a
-    /// random salt stored in the file header; no hand-rolled KDF here) —
-    /// safe to hand to another investigator/machine, who turns it back
-    /// into a normal local case with [`Case::import`].
+    /// `ExportFormat::Portable`, below). `ExportFormat::Report`/`::Html`
+    /// produce, respectively, a JSON and an HTML dump of every
+    /// entity/relationship, their attributes, and their audit trail —
+    /// SPEC.md §8 open question 6 (evidentiary report format); pair either
+    /// with `crate::report::sign_export` for tamper-evidence, since unlike
+    /// the SQLCipher formats these are plaintext. `ExportFormat::Portable`
+    /// answers §8's open question 1: it produces a SQLCipher file re-keyed
+    /// with the given passphrase (SQLCipher's own passphrase mode —
+    /// PBKDF2 over the passphrase, a random salt stored in the file
+    /// header; no hand-rolled KDF here) — safe to hand to another
+    /// investigator/machine, who turns it back into a normal local case
+    /// with [`Case::import`].
     pub fn export(&self, dest: &Path, format: ExportFormat) -> Result<(), EngineError> {
         if dest.exists() {
             return Err(EngineError::ExportDestinationExists(dest.to_path_buf()));
@@ -239,6 +246,7 @@ impl Case {
         match format {
             ExportFormat::Sqlite => export_sqlite(&self.conn, dest, ""),
             ExportFormat::Report => export_report(self, dest),
+            ExportFormat::Html => export_html(self, dest),
             ExportFormat::Portable(passphrase) => {
                 if passphrase.is_empty() {
                     return Err(EngineError::EmptyPassphrase);
@@ -675,6 +683,126 @@ fn export_report(case: &Case, dest: &Path) -> Result<(), EngineError> {
     Ok(())
 }
 
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+const REPORT_CSS: &str = "\
+body { font-family: sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }\
+h1, h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.3rem; }\
+.entity { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem 1rem; margin: 1rem 0; }\
+.entity .type { color: #666; font-weight: normal; }\
+table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }\
+th, td { border: 1px solid #ddd; padding: 0.3rem 0.5rem; text-align: left; font-size: 0.9rem; }\
+th { background: #f5f5f5; }\
+code { background: #f5f5f5; padding: 0.1rem 0.3rem; border-radius: 3px; }\
+";
+
+/// Same underlying data as [`export_report`], rendered as a self-contained
+/// HTML document instead of JSON — human-readable, openable in any
+/// browser, print-to-PDF-able from there (SPEC.md §8 open question 6),
+/// with no external CSS/JS/images so it stays a single portable file. All
+/// entity/plugin-supplied text is HTML-escaped.
+fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
+    let mut html = String::new();
+    html.push_str("<!doctype html>\n<html><head><meta charset=\"utf-8\">\n");
+    html.push_str(&format!(
+        "<title>Eumeaus case report — {}</title>\n<style>{REPORT_CSS}</style>\n",
+        html_escape(&case.name)
+    ));
+    html.push_str("</head><body>\n");
+    html.push_str(&format!("<h1>Case: {}</h1>\n", html_escape(&case.name)));
+    html.push_str(&format!(
+        "<p>Case ID: <code>{}</code><br>Generated: {}</p>\n",
+        case.case_id,
+        crate::now_unix_ms()
+    ));
+
+    html.push_str("<h2>Entities</h2>\n");
+    let entities = crud::list_entities(&case.conn, EntityFilter::default())?;
+    if entities.is_empty() {
+        html.push_str("<p><em>None.</em></p>\n");
+    }
+    for entity in entities {
+        let attrs = crud::list_attribute_records(&case.conn, entity.id)?;
+        let audit = crud::audit_trail(&case.conn, AuditTarget::Entity(entity.id))?;
+        html.push_str("<div class=\"entity\">\n");
+        html.push_str(&format!(
+            "<h3>{} <span class=\"type\">({})</span></h3>\n",
+            html_escape(&entity.display_label),
+            html_escape(&entity.entity_type.to_string())
+        ));
+        html.push_str(&format!(
+            "<p>ID: <code>{}</code><br>Canonical key: <code>{}</code></p>\n",
+            entity.id,
+            html_escape(entity.canonical_key.as_deref().unwrap_or("-"))
+        ));
+        if attrs.is_empty() {
+            html.push_str("<p><em>No attributes.</em></p>\n");
+        } else {
+            html.push_str(
+                "<table><tr><th>Key</th><th>Value</th><th>Source</th><th>Collected</th><th>Current</th><th>Fact ID</th></tr>\n",
+            );
+            for a in &attrs {
+                let current = match (a.is_current, a.conflicting) {
+                    (true, true) => "yes (conflict)",
+                    (true, false) => "yes",
+                    (false, _) => "no",
+                };
+                html.push_str(&format!(
+                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{current}</td><td><code>{}</code></td></tr>\n",
+                    html_escape(&a.key),
+                    html_escape(&a.value),
+                    html_escape(&a.source),
+                    a.collected_at_unix_ms,
+                    a.fact_id,
+                ));
+            }
+            html.push_str("</table>\n");
+        }
+        if !audit.is_empty() {
+            html.push_str("<h4>Audit events</h4>\n<ul>\n");
+            for e in &audit {
+                html.push_str(&format!(
+                    "<li>{} — {} by {}: {}</li>\n",
+                    e.occurred_at_unix_ms,
+                    html_escape(&e.event_type),
+                    html_escape(&e.actor),
+                    html_escape(&e.description)
+                ));
+            }
+            html.push_str("</ul>\n");
+        }
+        html.push_str("</div>\n");
+    }
+
+    html.push_str("<h2>Relationships</h2>\n");
+    let relationships = crud::list_relationships(&case.conn)?;
+    if relationships.is_empty() {
+        html.push_str("<p><em>None.</em></p>\n");
+    } else {
+        html.push_str("<table><tr><th>From</th><th>Type</th><th>To</th><th>Created</th></tr>\n");
+        for r in &relationships {
+            html.push_str(&format!(
+                "<tr><td><code>{}</code></td><td>{}</td><td><code>{}</code></td><td>{}</td></tr>\n",
+                r.from,
+                html_escape(&r.relationship_type.to_string()),
+                r.to,
+                r.created_at_unix_ms
+            ));
+        }
+        html.push_str("</table>\n");
+    }
+
+    html.push_str("</body></html>\n");
+    fs::write(dest, html)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -829,6 +957,37 @@ mod tests {
         let report: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(report["entities"].as_array().unwrap().len(), 2);
         assert_eq!(report["relationships"].as_array().unwrap().len(), 1);
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn export_html_writes_a_self_contained_document_with_escaped_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "export-html").unwrap();
+        case.add_entity(
+            EntityType::Person,
+            Some("<script>alert(1)</script>".to_string()),
+            vec![Attribute {
+                key: "note".to_string(),
+                value: "value with <b>tags</b> & \"quotes\"".to_string(),
+            }],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let dest = dir.path().join("report.html");
+        case.export(&dest, ExportFormat::Html).unwrap();
+
+        let html = fs::read_to_string(&dest).unwrap();
+        assert!(html.starts_with("<!doctype html>"));
+        assert!(html.contains("<h1>Case: export-html</h1>"));
+        assert!(
+            !html.contains("<script>alert(1)</script>"),
+            "entity-supplied content must be HTML-escaped, not injected raw:\n{html}"
+        );
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(html.contains("value with &lt;b&gt;tags&lt;/b&gt; &amp; &quot;quotes&quot;"));
 
         cleanup(&case);
     }

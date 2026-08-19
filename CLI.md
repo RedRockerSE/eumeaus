@@ -44,7 +44,8 @@ cargo build --workspace
 eumeaus case create <name> [--path <dir>]
 eumeaus case open <path>
 eumeaus case list [--path <dir>]
-eumeaus case export <path> --out <file> [--format sqlite|report|portable]
+eumeaus case export <path> --out <file> [--format sqlite|report|html|portable]
+                     [--sign-key-file <path>]
 eumeaus case import <source> <name> [--path <dir>]
 ```
 
@@ -62,11 +63,12 @@ sidecar), so it works even without keychain access.
 of the whole case via SQLCipher's own `sqlcipher_export()` — readable by
 plain `sqlite3`, with no key. Treat the output file as sensitive, same as
 you would the decrypted data itself; this is *not* the handoff mechanism
-(see `--format portable`, below). `--format report` instead writes a
-human-readable JSON dump of every entity and relationship, their
-attributes, and their audit trail — a minimal stand-in for SPEC.md §8's
-open question 6 (evidentiary report format), not a signed PDF/JSON
-bundle. All three refuse to overwrite an existing `--out`.
+(see `--format portable`, below). `--format report`/`--format html` write
+the same underlying data — every entity/relationship, their attributes,
+and their audit trail — as JSON or as a self-contained HTML document
+(openable in any browser, print-to-PDF-able from there; no external
+CSS/JS, so it's still one portable file). All four formats refuse to
+overwrite an existing `--out`.
 
 ```console
 $ eumeaus case list --path .
@@ -75,6 +77,25 @@ $ eumeaus case export acme-investigation.eum --out acme.sqlite --format sqlite
 $ python3 -c "import sqlite3; print(list(sqlite3.connect('acme.sqlite').execute('select entity_type, canonical_key from entities')))"
 [('Username', 'jdoe123'), ('Person', 'john doe'), ('Person', None)]
 $ eumeaus case export acme-investigation.eum --out acme-report.json --format report
+$ eumeaus case export acme-investigation.eum --out acme-report.html --format html
+```
+
+**Signing an export** (SPEC.md §8 open question 6, evidentiary report
+format, now resolved): `--sign-key-file <path>` signs whatever `--out`
+just wrote, appending `.sig` and printing the signer's public key. Mainly
+useful for `--format report`/`html` — unlike the SQLCipher formats, those
+are plaintext with no tamper-evidence of their own. `<path>` holds a
+hex-encoded 32-byte Ed25519 private key that *you* generate and manage
+with whatever tool you already trust — this tool never generates or
+stores one for you (same philosophy as `trust`, below). See [`report
+verify`](#report) to check the result.
+
+```console
+$ eumeaus case export acme-investigation.eum --out report.json --format report \
+    --sign-key-file signing_key.hex
+eee79cab144b8ab5e7c78e4f8a1ef0d53fb51a130bec5a64f49ecc5b3d4b8af8
+$ ls report.json.sig
+report.json.sig
 ```
 
 **Handing off a case to another investigator/machine** (SPEC.md §8 open
@@ -103,8 +124,10 @@ ca12dbec-f0df-4d4e-8262-01059341359b	Username	torvalds	torvalds
 A wrong passphrase on `import` fails the same way a corrupt/tampered case
 file does (`case file ... is corrupt or tampered: SQLCipher key was
 rejected, or the file is corrupt/tampered`) and leaves no partial case
-file behind. A plugin's `--trusted-key` signature has nothing to do with
-any of this — it covers a *plugin's* name/version/binary, never case data.
+file behind. This passphrase is unrelated to `--trusted-key`/`--trust`
+used elsewhere (`scan run`, `plugin verify`, `report verify`) — those
+verify an Ed25519 *signature* over a plugin or a report, not a SQLCipher
+passphrase.
 
 ### `entity`
 
@@ -517,6 +540,37 @@ $ eumeaus --case acme-investigation.eum scan run \
     --plugins-dir plugins --target-type Username --target-value torvalds \
     --trust my-first-party-key
 error: plugin host error: trust store error: no trusted key named "my-first-party-key" (see `eumeaus trust list`)
+```
+
+### `report`
+
+```
+eumeaus report verify <report> --sig <file> (--trusted-key <hex> | --trust <name>)
+```
+
+Checks a detached signature written by `case export --sign-key-file` (see
+the `case` section above). No `--case` needed — the report and its `.sig`
+are standalone files, possibly handed off entirely separately from the
+case that produced them. Exactly one of `--trusted-key`/`--trust` is
+required. Prints `valid` on success; a tampered report or the wrong key
+both fail the same way (`signature does not verify`) — the message
+doesn't distinguish which, on purpose, same as most signature schemes.
+
+```console
+$ eumeaus report verify report.json --sig report.json.sig \
+    --trusted-key eee79cab144b8ab5e7c78e4f8a1ef0d53fb51a130bec5a64f49ecc5b3d4b8af8
+valid
+$ eumeaus trust add investigator-key eee79cab144b8ab5e7c78e4f8a1ef0d53fb51a130bec5a64f49ecc5b3d4b8af8
+$ eumeaus report verify report.json --sig report.json.sig --trust investigator-key
+valid
+```
+
+If the report is edited after signing (even a single character in one
+attribute value), verification fails:
+
+```console
+$ eumeaus report verify report-tampered.json --sig report-tampered.json.sig --trust investigator-key
+error: plugin host error: signature error: signature does not verify
 ```
 
 ## Entity and relationship types
