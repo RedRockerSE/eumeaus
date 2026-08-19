@@ -1005,6 +1005,93 @@ default_timeout_ms = {default_timeout_ms}
         );
     }
 
+    /// SPEC.md §8 open question 5, now resolved: proves — rather than just
+    /// asserting in a doc — that one process can hold two different cases
+    /// open and actively scanning at the same time, with no hidden global
+    /// lock serializing them. Each `Case` owns its own `Connection`, OS
+    /// file lock, and per-scan `tokio::runtime::Runtime`; nothing here is
+    /// shared engine-wide state, which is exactly what a future GUI's
+    /// multiple simultaneous case tabs would need.
+    #[test]
+    fn two_different_cases_scan_concurrently_in_one_process() {
+        let base = tempfile::tempdir().unwrap();
+        let plugins_dir = base.path().join("plugins");
+        write_manifest(&plugins_dir, "scan-slow", "scan_slow", 5000);
+
+        let (case_a, target_a) = new_case_with_target(&base.path().join("case-a"), "case-a");
+        let (case_b, target_b) = new_case_with_target(&base.path().join("case-b"), "case-b");
+        let (plugins_dir_a, plugins_dir_b) = (plugins_dir.clone(), plugins_dir.clone());
+
+        let start = Instant::now();
+        let thread_a = std::thread::spawn(move || {
+            let mut case = case_a;
+            let scan_id = case
+                .start_scan(
+                    &plugins_dir_a,
+                    vec![],
+                    TargetEntity { id: target_a },
+                    ScanConfig::default(),
+                    TrustPolicy::AllowUnsigned,
+                )
+                .unwrap();
+            (case, scan_id)
+        });
+        let thread_b = std::thread::spawn(move || {
+            let mut case = case_b;
+            let scan_id = case
+                .start_scan(
+                    &plugins_dir_b,
+                    vec![],
+                    TargetEntity { id: target_b },
+                    ScanConfig::default(),
+                    TrustPolicy::AllowUnsigned,
+                )
+                .unwrap();
+            (case, scan_id)
+        });
+        let (case_a, scan_id_a) = thread_a.join().unwrap();
+        let (case_b, scan_id_b) = thread_b.join().unwrap();
+        let elapsed = start.elapsed();
+
+        // scan-slow sleeps 300ms once per scan (a single plugin, so
+        // worker_pool doesn't matter here). If the two cases' scans were
+        // secretly serialized by some hidden global lock, this would take
+        // ~600ms+; genuine cross-case concurrency keeps it well under
+        // that — the same generous margin worker_pool_bounds_concurrency
+        // uses, for the same CI/scheduler-jitter reason.
+        assert!(
+            elapsed.as_millis() < 450,
+            "two different cases' scans should run concurrently, not serially: took {elapsed:?}"
+        );
+
+        assert_eq!(
+            case_a.scan_status(scan_id_a).unwrap(),
+            ScanStatus::Completed
+        );
+        assert_eq!(
+            case_b.scan_status(scan_id_b).unwrap(),
+            ScanStatus::Completed
+        );
+
+        // Each case only sees its own result — separate files, so this is
+        // guaranteed structurally, but worth asserting as documentation.
+        let entities_a = case_a
+            .list_entities(EntityFilter {
+                entity_type: Some(EntityType::OnlineAccount),
+            })
+            .unwrap();
+        let entities_b = case_b
+            .list_entities(EntityFilter {
+                entity_type: Some(EntityType::OnlineAccount),
+            })
+            .unwrap();
+        assert_eq!(entities_a.len(), 1);
+        assert_eq!(entities_b.len(), 1);
+
+        keystore::delete_key(case_a.id()).ok();
+        keystore::delete_key(case_b.id()).ok();
+    }
+
     #[test]
     fn resume_scan_only_reruns_pending_runs() {
         let base = tempfile::tempdir().unwrap();
