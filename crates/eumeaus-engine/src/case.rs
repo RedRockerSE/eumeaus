@@ -16,9 +16,10 @@ use rusqlite::{params, Connection, ErrorCode};
 use uuid::Uuid;
 
 use crate::{
-    crud, keystore, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, CaseSummary,
-    EngineError, Entity, EntityFilter, EntityId, EntityType, FactId, PluginRef, Provenance,
-    RelationshipId, RelationshipType, ScanConfig, ScanId, ScanStatus, ScanSummary, TargetEntity,
+    crud, keystore, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, CaseStats,
+    CaseSummary, EngineError, Entity, EntityFilter, EntityId, EntityType, FactId, PluginRef,
+    Provenance, Relationship, RelationshipId, RelationshipType, ScanConfig, ScanId, ScanStatus,
+    ScanSummary, TargetEntity,
 };
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
@@ -451,6 +452,25 @@ impl Case {
 
     pub fn audit_trail(&self, target: AuditTarget) -> Result<Vec<AuditEvent>, EngineError> {
         crud::audit_trail(&self.conn, target)
+    }
+
+    /// Every audit event in the case, newest first, capped at `limit` —
+    /// backs the GUI's Overview screen (SPEC.md §9.3), which has no single
+    /// target the way [`Case::audit_trail`] does.
+    pub fn audit_trail_all(&self, limit: u32) -> Result<Vec<AuditEvent>, EngineError> {
+        crud::audit_trail_all(&self.conn, limit)
+    }
+
+    /// Not in SPEC.md §3.1 (no `relationship list` CLI command exists
+    /// either — see `crud::list_relationships`'s own doc); added for the
+    /// GUI's Graph screen (SPEC.md §9.3), which needs the full graph.
+    pub fn list_relationships(&self) -> Result<Vec<Relationship>, EngineError> {
+        crud::list_relationships(&self.conn)
+    }
+
+    /// Case-wide counts for the GUI's Overview screen (SPEC.md §9.3).
+    pub fn case_stats(&self) -> Result<CaseStats, EngineError> {
+        crud::case_stats(&self.conn)
     }
 
     /// Runs `plugins` (or, if empty, every discovered plugin compatible

@@ -726,6 +726,61 @@ pub(crate) fn audit_trail(
     Ok(rows)
 }
 
+/// Every audit event in the case, newest first — added for the GUI's
+/// Overview screen (SPEC.md §9.3), which shows a mixed feed across every
+/// entity/relationship rather than one target's history the way
+/// `audit_trail` (and `eumeaus-cli`'s `audit show`) always has.
+pub(crate) fn audit_trail_all(
+    conn: &Connection,
+    limit: u32,
+) -> Result<Vec<AuditEvent>, EngineError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, event_type, description, actor, occurred_at
+         FROM audit_events ORDER BY occurred_at DESC LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            let id: String = row.get(0)?;
+            Ok(AuditEvent {
+                id: Uuid::parse_str(&id).expect("stored audit event id is a valid uuid"),
+                event_type: row.get(1)?,
+                description: row.get(2)?,
+                actor: row.get(3)?,
+                occurred_at_unix_ms: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Case-wide counts for the GUI's Overview screen (SPEC.md §9.3) — no
+/// CLI command surfaces these today, so this is purely additive.
+/// `conflicting_entity_count` mirrors `attribute_records_from_table`'s own
+/// per-key "more than one distinct value" definition of conflicting,
+/// aggregated across every entity in one query rather than looping
+/// `list_attribute_records` per entity.
+pub(crate) fn case_stats(conn: &Connection) -> Result<crate::CaseStats, EngineError> {
+    let entity_count = conn.query_row("SELECT COUNT(*) FROM entities", [], |r| r.get(0))?;
+    let fact_count = conn.query_row("SELECT COUNT(*) FROM facts", [], |r| r.get(0))?;
+    let relationship_count =
+        conn.query_row("SELECT COUNT(*) FROM relationships", [], |r| r.get(0))?;
+    let conflicting_entity_count = conn.query_row(
+        "SELECT COUNT(DISTINCT entity_id) FROM (
+            SELECT entity_id FROM entity_attributes
+            GROUP BY entity_id, key
+            HAVING COUNT(DISTINCT value) > 1
+         )",
+        [],
+        |r| r.get(0),
+    )?;
+    Ok(crate::CaseStats {
+        entity_count,
+        fact_count,
+        relationship_count,
+        conflicting_entity_count,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1340,5 +1395,154 @@ mod tests {
         let missing = RelationshipId(Uuid::new_v4());
         let err = list_relationship_attribute_records(&conn, missing).unwrap_err();
         assert!(matches!(err, EngineError::RelationshipNotFound(_)));
+    }
+
+    #[test]
+    fn case_stats_counts_entities_facts_relationships_and_conflicts() {
+        let mut conn = test_conn();
+        let a = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![attr("name", "Alice"), attr("nickname", "Al")],
+            test_provenance(),
+        )
+        .unwrap();
+        // A second fact for the same key with a different value — makes
+        // "name" a conflicting attribute on entity a.
+        add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("bob-key".to_string()),
+            vec![attr("name", "Bob")],
+            test_provenance(),
+        )
+        .unwrap();
+        let b_for_rel = add_entity(
+            &mut conn,
+            EntityType::Organization,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        add_relationship(
+            &mut conn,
+            a,
+            b_for_rel,
+            RelationshipType::MemberOf,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        // Second fact on entity a's "name" key, different value: conflict.
+        add_attribute_to_existing_entity(&mut conn, a, "name", "Alicia");
+
+        let stats = case_stats(&conn).unwrap();
+        assert_eq!(stats.entity_count, 3);
+        // One fact per add_entity/add_relationship call regardless of how
+        // many attrs it carries (all attrs share that one fact_id) — a's
+        // creation (1), bob's (1), b_for_rel's (1), the relationship (1),
+        // plus the extra "name" fact added below (1) = 5.
+        assert_eq!(stats.fact_count, 5);
+        assert_eq!(stats.relationship_count, 1);
+        assert_eq!(stats.conflicting_entity_count, 1);
+    }
+
+    /// Test-only helper: adds one more fact/entity_attribute row directly,
+    /// simulating a later correction to an existing entity's attribute
+    /// (append-only, same as `add_entity`'s own fact-per-attribute shape)
+    /// without going through the public API, which has no "add a fact to
+    /// an existing entity" operation yet (SPEC.md §8 leaves that to plugin
+    /// ingestion / a future manual-edit command).
+    fn add_attribute_to_existing_entity(
+        conn: &mut Connection,
+        id: EntityId,
+        key: &str,
+        value: &str,
+    ) {
+        let p = test_provenance();
+        let fact_id = Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO facts (id, entity_id, source, source_version, confidence_status, collected_at)
+             VALUES (?1, ?2, ?3, ?4, 'FOUND', ?5)",
+            params![fact_id.to_string(), id.0.to_string(), p.source, p.source_version, now_unix_ms()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO entity_attributes (id, entity_id, fact_id, key, value)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                Uuid::new_v4().to_string(),
+                id.0.to_string(),
+                fact_id.to_string(),
+                key,
+                value
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn audit_trail_all_returns_every_event_newest_first() {
+        let mut conn = test_conn();
+        let a = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![attr("name", "Alice")],
+            test_provenance(),
+        )
+        .unwrap();
+        let b = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![attr("name", "Bob")],
+            test_provenance(),
+        )
+        .unwrap();
+        let c = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![attr("name", "Carol")],
+            test_provenance(),
+        )
+        .unwrap();
+        merge_entities(&mut conn, a, b, actor()).unwrap();
+        merge_entities(&mut conn, a, c, actor()).unwrap();
+
+        let events = audit_trail_all(&conn, 10).unwrap();
+        assert_eq!(events.len(), 2);
+        // Newest first: the a+c merge happened after the a+b merge.
+        assert!(events[0].occurred_at_unix_ms >= events[1].occurred_at_unix_ms);
+        assert!(events.iter().all(|e| e.event_type == "merge"));
+    }
+
+    #[test]
+    fn audit_trail_all_respects_the_limit() {
+        let mut conn = test_conn();
+        let a = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        for _ in 0..3 {
+            let b = add_entity(
+                &mut conn,
+                EntityType::Person,
+                None,
+                vec![],
+                test_provenance(),
+            )
+            .unwrap();
+            merge_entities(&mut conn, a, b, actor()).unwrap();
+        }
+        let events = audit_trail_all(&conn, 2).unwrap();
+        assert_eq!(events.len(), 2);
     }
 }

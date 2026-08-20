@@ -390,6 +390,16 @@ pub struct ScanProgressEvent {
 
 pub type ScanProgressSender = tokio::sync::mpsc::UnboundedSender<ScanProgressEvent>;
 
+/// Case-wide counts for the GUI's Overview screen (SPEC.md §9.3) — no
+/// CLI command surfaces these today; added purely for that screen.
+#[derive(Debug, Clone, Copy)]
+pub struct CaseStats {
+    pub entity_count: i64,
+    pub fact_count: i64,
+    pub relationship_count: i64,
+    pub conflicting_entity_count: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct PluginRef {
     pub name: String,
