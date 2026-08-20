@@ -30,6 +30,15 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/RedRockerSE/eumeaus/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc1QzY5NDg5RkJEMjc1MDYKUldRR2RkTDdpWlRHZFdIZmU3b3BSeDhuYVJaTjZvVTVEM3A2Mi9wQkVUS3ZacE9kQVZuYzY5cjEK"
+    }
   }
 }

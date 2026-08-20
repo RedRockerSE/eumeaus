@@ -34,10 +34,9 @@ before merge.
 - `crates/eumeaus-cli` — thin CLI wrapper over the engine API; also the
   end-to-end test surface (`crates/eumeaus-cli/tests/`), including the v1
   proof (`e2e_v1_proof.rs`, SPEC.md §6).
-- `crates/eumeaus-gui` — Tauri 2.x + React/TS GUI (SPEC.md §9, v2, not v1
-  scope). Frontend at the crate root; the Rust/Tauri side and its own
-  `Cargo.toml` are in `src-tauri/` (the actual workspace member), a thin
-  `#[tauri::command]` wrapper over the engine API like the CLI is.
+- `crates/eumeaus-gui` — Tauri 2.x + React/TS GUI (SPEC.md §9, v2). Frontend
+  at the crate root; `src-tauri/` (the actual workspace member) is a thin
+  `#[tauri::command]` wrapper over the engine API, like the CLI.
 
 ## Conventions
 
@@ -104,13 +103,15 @@ fetch and verify from there — both tested end-to-end, which caught a
 real checksum-file newline bug (`release.yml`'s Windows packaging step).
 
 GUI (SPEC.md §9, `feat/gui-tauri` branch): design resolved (Tauri 2.x,
-React+TS, Linux+Windows only, `crates/` workspace). G0–G5 done, each
-verified live: case lifecycle, entity/fact CRUD + merge/split, scan run
-with live progress (needed one additive engine API —
-`Case::resume_scan_with_progress`, §9.2 — against the real
-username-search plugin), and plugin/credential/trust management
-(`plugin_state.rs`/`credential_state.rs`/`trust_state.rs`, none
-case-scoped). G6 (packaging/signing/updater) is next and last.
+React+TS, Linux+Windows only, `crates/` workspace). G0–G5 done and
+verified live. G6 (`release-gui.yml`, `gui-v*` tags) mostly done:
+updater/process plugins wired in and live-verified reaching their
+endpoint; a real signing keypair is generated (public half committed in
+`tauri.conf.json`, private half still needs adding as the
+`TAURI_SIGNING_PRIVATE_KEY` GitHub secret). Windows Authenticode signing
+deliberately deferred (real cert/cost, outside what could be done here)
+— ships unsigned. Still needed: that secret, then a real `gui-v0.1.0`/
+`gui-v0.1.1` pair to test an actual applied update.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/
@@ -127,10 +128,9 @@ lists `entity_attributes`); `eumeaus-plugin-host`'s async API and
   real key there. Works out of the box in a normal desktop session; CI
   starts one explicitly (`.github/workflows/ci.yml`). Headless/SSH with no
   keyring daemon: these tests hang or fail on `EngineError::Keychain`.
-- No system `protoc` is assumed to be installed; `eumeaus-plugin-protocol`'s
-  build.rs points `PROTOC` at the `protoc-bin-vendored` crate's bundled
-  binary instead. Don't add a "install protoc" CI step — it's unnecessary
-  and would mask a build.rs regression if the vendoring ever broke.
+- No system `protoc` assumed installed; `eumeaus-plugin-protocol`'s build.rs
+  points `PROTOC` at `protoc-bin-vendored`'s bundled binary instead — don't
+  add an "install protoc" CI step, it'd mask a build.rs regression.
 - `rusqlite` uses `bundled-sqlcipher-vendored-openssl`, not plain
   `bundled-sqlcipher` — the latter dynamically links the *build machine's*
   OpenSSL (confirmed via `ldd`), breaking release binaries on any other

@@ -43,8 +43,21 @@ fn list_entity_types() -> Vec<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+
+    // G6 (SPEC.md §9.4/§9.6): desktop-only, same as every other Tauri
+    // project's own setup — this GUI targets Linux/Windows desktop only
+    // (§9.7), never mobile, but gating on #[cfg(desktop)] costs nothing
+    // and matches upstream's own convention.
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
+    }
+
+    builder
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             list_entity_types,

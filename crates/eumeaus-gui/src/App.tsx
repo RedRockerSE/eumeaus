@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import "./App.css";
 
 interface CaseInfo {
@@ -822,6 +824,73 @@ function TrustScreen() {
   );
 }
 
+// G6 (SPEC.md §9.4/§9.6, resolves §8.8): tauri-plugin-updater — checks
+// the endpoint configured in tauri.conf.json (a latest.json the release
+// workflow publishes, same GitHub Releases hosting install.sh/.ps1
+// already use for the CLI). Signature verification against the pubkey
+// in tauri.conf.json happens inside the plugin itself before download()
+// even starts; a tampered/unsigned latest.json fails there, not here.
+function UpdateScreen() {
+  const [status, setStatus] = useState<
+    "idle" | "checking" | "up-to-date" | "available" | "installing" | "installed" | "error"
+  >("idle");
+  const [availableVersion, setAvailableVersion] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function check() {
+    setStatus("checking");
+    setError(null);
+    try {
+      const update = await checkForUpdate();
+      if (update) {
+        setAvailableVersion(update.version);
+        setStatus("available");
+      } else {
+        setStatus("up-to-date");
+      }
+    } catch (e) {
+      setError(String(e));
+      setStatus("error");
+    }
+  }
+
+  async function installAndRestart() {
+    setStatus("installing");
+    setError(null);
+    try {
+      const update = await checkForUpdate();
+      if (!update) {
+        setStatus("up-to-date");
+        return;
+      }
+      await update.downloadAndInstall();
+      setStatus("installed");
+      await relaunch();
+    } catch (e) {
+      setError(String(e));
+      setStatus("error");
+    }
+  }
+
+  return (
+    <section>
+      <h2>Updates</h2>
+      {error && <p style={{ color: "red" }}>{error}</p>}
+      <button onClick={check} disabled={status === "checking"}>
+        Check for updates
+      </button>
+      {status === "up-to-date" && <p>Up to date.</p>}
+      {status === "available" && (
+        <div>
+          <p>Version {availableVersion} is available.</p>
+          <button onClick={installAndRestart}>Install and restart</button>
+        </div>
+      )}
+      {status === "installing" && <p>Installing…</p>}
+    </section>
+  );
+}
+
 // G0 (SPEC.md §9.6): fetch the taxonomy from eumeaus-engine via the
 // list_entity_types command, proving the IPC boundary works end to end
 // (frontend -> Tauri command -> eumeaus-engine -> back).
@@ -857,13 +926,14 @@ function App() {
   return (
     <main className="container">
       <h1>Eumeaus</h1>
-      <p>GUI scaffold (SPEC.md §9, milestone G5)</p>
+      <p>GUI scaffold (SPEC.md §9, milestone G6)</p>
       <CaseScreen current={currentCase} onChange={setCurrentCase} />
       {currentCase && <EntityScreen />}
       {currentCase && <ScanScreen />}
       <PluginScreen />
       <CredentialScreen />
       <TrustScreen />
+      <UpdateScreen />
       <EntityTypesScreen />
     </main>
   );

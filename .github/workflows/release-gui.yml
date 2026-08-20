@@ -1,0 +1,81 @@
+name: Release GUI
+
+# Separate from release.yml (the CLI's own pipeline, triggered by `v*`)
+# on purpose: the GUI (SPEC.md §9) is a different product surface with
+# its own version (crates/eumeaus-gui/src-tauri/tauri.conf.json), still
+# mid-milestone (G0–G6) rather than a shipped v1 — coupling its release
+# cadence to the CLI's, or risking the CLI's already-working pipeline
+# while iterating on this one, isn't worth it. Tag namespace: `gui-v*`.
+on:
+  push:
+    tags:
+      - "gui-v*"
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Confirm the tag matches tauri.conf.json's version
+        run: |
+          tag="${GITHUB_REF#refs/tags/gui-v}"
+          conf_version=$(jq -r '.version' crates/eumeaus-gui/src-tauri/tauri.conf.json)
+          if [ "$tag" != "$conf_version" ]; then
+            echo "::error::tag gui-v$tag does not match tauri.conf.json's version ($conf_version)"
+            exit 1
+          fi
+
+  build:
+    needs: check-version
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/eumeaus-gui/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Same package list as CLAUDE.md's Gotchas entry for this — Tauri's
+      # Rust side won't even compile on Linux without these, and unlike
+      # the CLI's musl target this isn't vendorable/cross-checkable, it's
+      # the runner's own native linking.
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev
+
+      - name: Install frontend dependencies
+        working-directory: crates/eumeaus-gui
+        run: npm ci
+
+      # No code-signing certificate configured yet (SPEC.md §9.4/§9.7):
+      # Windows builds are unsigned for now — SmartScreen will warn until
+      # a real Authenticode certificate is obtained and wired in here.
+      # The updater's own signing (a separate, already-generated Ed25519
+      # keypair — see tauri.conf.json's pubkey) works regardless; it's
+      # what tauri-action signs update artifacts with below.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: crates/eumeaus-gui
+          tagName: gui-v__VERSION__
+          releaseName: "Eumeaus GUI v__VERSION__"
+          releaseBody: "See the assets to download and install this version."
+          # A human reviews and publishes manually — same reasoning as
+          # release.yml's draft: true for the CLI.
+          releaseDraft: true
+          uploadUpdaterJson: true
+          # NSIS (setup.exe) over WiX (.msi) for the updater artifact —
+          # better silent-update support, per Tauri's own guidance.
+          updaterJsonPreferNsis: true

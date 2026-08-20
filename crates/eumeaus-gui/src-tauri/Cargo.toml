@@ -32,6 +32,12 @@ tokio = { workspace = true, features = ["sync"] }
 # G5's plugin_verify (plugin_state.rs) needs to build a raw hex trusted
 # key into a VerifyingKey the same way eumeaus-cli's parse_hex_key does.
 ed25519-dalek.workspace = true
+# G6 (SPEC.md §9.4/§9.6, resolves §8.8): framework-native updater. Its
+# minisign-style Ed25519 signing keypair is separate from this plugin's
+# own (plugin-manifest signing) and from case export's report-signing
+# key — SPEC.md §9.4 calls out that this is deliberate, not an oversight.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [dev-dependencies]
 tempfile = "3.13.0"
