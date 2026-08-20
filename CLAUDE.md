@@ -96,30 +96,30 @@ SPEC.md §7's milestones (M0–M6) are done — v1 CLI complete, released,
 public (`CLI.md` is the full reference); §8.1–8.7 resolved, §8.8 has a
 design (§9). v0.1.0 is tagged/published via `.github/workflows/
 release.yml` (tag push → Linux musl + Windows msvc archives + checksums
-→ draft Release); `install.sh`/`install.ps1` fetch/verify from there —
-both tested end-to-end (a real checksum-newline bug was caught this way;
-see the Windows packaging step's comment).
+→ draft Release); `install.sh`/`install.ps1` fetch/verify from there,
+both tested end-to-end (a real checksum-newline bug was caught this way).
 
 GUI (SPEC.md §9): design resolved (Tauri 2.x, React+TS, Linux+Windows
-only, `crates/` workspace). G0–G6 done; `gui-v0.1.0` tagged/published
-(unsigned — Windows Authenticode needs a real certificate, deferred).
-UX redesign (claude.ai/design handover, merged) replaced G0–G6's flat
-forms: custom titlebar (`decorations: false`), sidebar screens
-(Overview/Entities/Graph/Scans/Plugins/Settings), all real backend
-commands, no mock data — see `api.ts`/`entityStyle.ts`. Graph uses a
-real circular layout (no force-directed dep exists here); Launcher's
-"recent cases" is a real directory browser (`case_list`), since no MRU
-tracking exists in the backend. Report export + signature verify
-(SPEC.md §9.3, `report_state.rs`) lives on the Overview screen —
-`case_export`/`report_verify` wrap `Case::export`/`report::sign_export`/
-`verify_report`, the CLI's own `case export`/`report verify` calls.
+only, `crates/` workspace). G0–G6 done; `gui-v0.1.0`/`gui-v0.1.1`
+tagged/published (unsigned — Windows Authenticode deferred). Updater
+verified live end-to-end on `gui-v0.1.1`: a running v0.1.0 instance
+detected, downloaded, verified, installed, relaunched into it. UX
+redesign (claude.ai/design handover, merged) replaced G0–G6's flat
+forms: custom titlebar, sidebar screens (Overview/Entities/Graph/Scans/
+Plugins/Settings), all real backend commands, no mock data — see
+`api.ts`/`entityStyle.ts`. Graph uses a real circular layout (no
+force-directed dep exists); Launcher's "recent cases" is a real
+directory browser (`case_list`, no MRU tracking backend-side). Report
+export + verify (`report_state.rs`) lives on Overview, wrapping the
+CLI's own `case export`/`report verify` calls.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
-of deviation: `Case::get_entity`/`list_attribute_records`/
-`find_entity_by_key`/`create_scan` (§3.1 gives no signatures);
-`RelationshipType::Custom` + `relationship_attributes` table (§4.2 only
-lists `entity_attributes`); `eumeaus-plugin-host`'s async API,
-`Case::start_scan`'s `Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions), and the plugin signature scheme (§3.3 has none).
+of deviation: `Case::get_entity`/`list_attribute_records`/`find_entity_by_key`/
+`create_scan` (§3.1 gives no signatures); `RelationshipType::Custom` +
+`relationship_attributes` table (§4.2 only lists `entity_attributes`);
+`eumeaus-plugin-host`'s async API, `Case::start_scan`'s
+`Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions), and
+the plugin signature scheme (§3.3 has none).
 
 ## Gotchas
 
