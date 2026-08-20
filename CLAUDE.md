@@ -100,26 +100,26 @@ release.yml` (tag push → Linux musl + Windows msvc archives + checksums
 both tested end-to-end (a real checksum-newline bug was caught this way;
 see the Windows packaging step's comment).
 
-GUI (SPEC.md §9, `feat/gui-tauri` branch): design resolved (Tauri 2.x,
-React+TS, Linux+Windows only, `crates/` workspace). G0–G6 all done and
-live-verified; `gui-v0.1.0` tagged and published (unsigned — Windows
-Authenticode needs a real certificate, deliberately deferred).
-
-UX redesign (`feat/gui-ux-design`, claude.ai/design handover) replaced
-G0–G6's flat unstyled forms: custom titlebar (`decorations: false`),
-sidebar screens (Overview/Entities/Graph/Scans/Plugins/Settings), all
-real backend commands, no mock data — see `api.ts`/`entityStyle.ts`.
-Graph uses a real circular layout (no force-directed dep exists here);
-Launcher's "recent cases" is a real directory browser (`case_list`),
-since no MRU tracking exists in the backend.
+GUI (SPEC.md §9): design resolved (Tauri 2.x, React+TS, Linux+Windows
+only, `crates/` workspace). G0–G6 done; `gui-v0.1.0` tagged/published
+(unsigned — Windows Authenticode needs a real certificate, deferred).
+UX redesign (claude.ai/design handover, merged) replaced G0–G6's flat
+forms: custom titlebar (`decorations: false`), sidebar screens
+(Overview/Entities/Graph/Scans/Plugins/Settings), all real backend
+commands, no mock data — see `api.ts`/`entityStyle.ts`. Graph uses a
+real circular layout (no force-directed dep exists here); Launcher's
+"recent cases" is a real directory browser (`case_list`), since no MRU
+tracking exists in the backend. Report export + signature verify
+(SPEC.md §9.3, `report_state.rs`) lives on the Overview screen —
+`case_export`/`report_verify` wrap `Case::export`/`report::sign_export`/
+`verify_report`, the CLI's own `case export`/`report verify` calls.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/
 `find_entity_by_key`/`create_scan` (§3.1 gives no signatures);
 `RelationshipType::Custom` + `relationship_attributes` table (§4.2 only
-lists `entity_attributes`); `eumeaus-plugin-host`'s async API and
-`Case::start_scan`'s `Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params
-(see Conventions); the plugin signature scheme (§3.3 doesn't specify one).
+lists `entity_attributes`); `eumeaus-plugin-host`'s async API,
+`Case::start_scan`'s `Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions), and the plugin signature scheme (§3.3 has none).
 
 ## Gotchas
 
