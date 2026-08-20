@@ -338,6 +338,37 @@ pub async fn relationship_list(
         .map_err(|e| e.to_string())?
 }
 
+fn do_entity_audit(
+    cell: &Arc<Mutex<Option<Case>>>,
+    id: &str,
+) -> Result<Vec<crate::overview_state::AuditEventDto>, String> {
+    let guard = cell.lock().unwrap();
+    let case = guard.as_ref().ok_or(NO_CASE_OPEN)?;
+    let entity_id = EntityId(id.parse().map_err(|e| format!("invalid entity id: {e}"))?);
+    case.audit_trail(eumeaus_engine::AuditTarget::Entity(entity_id))
+        .map(|events| {
+            events
+                .into_iter()
+                .map(crate::overview_state::AuditEventDto::from)
+                .collect()
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// One entity's own history — the design's "History" tab (SPEC.md §9.3),
+/// distinct from `audit_list`'s case-wide feed (Overview). Reuses
+/// `Case::audit_trail` (existing since M2), not the new `audit_trail_all`.
+#[tauri::command]
+pub async fn entity_audit(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<Vec<crate::overview_state::AuditEventDto>, String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_audit(&cell, &id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn entity_list(
     state: tauri::State<'_, AppState>,
@@ -650,5 +681,23 @@ mod tests {
         assert_eq!(rels[0].from, a.to_string());
         assert_eq!(rels[0].to, b.to_string());
         assert_eq!(rels[0].relationship_type, "MemberOf");
+    }
+
+    #[test]
+    fn entity_audit_shows_only_that_entitys_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-entity-audit").unwrap();
+        let a = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let b = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        case.merge_entities(a, b, default_actor()).unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let events = do_entity_audit(&cell, &a.to_string()).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "merge");
     }
 }

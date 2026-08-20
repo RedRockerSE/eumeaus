@@ -15,8 +15,10 @@ use serde::Serialize;
 pub struct PluginSummary {
     pub name: String,
     pub version: String,
+    pub description: String,
     pub signed: bool,
     pub entrypoint: String,
+    pub input_entity_types: Vec<String>,
 }
 
 impl From<PluginManifest> for PluginSummary {
@@ -24,8 +26,10 @@ impl From<PluginManifest> for PluginSummary {
         PluginSummary {
             name: m.plugin.name.clone(),
             version: m.plugin.version.clone(),
+            description: m.plugin.description.clone(),
             signed: m.plugin.signature.is_some(),
             entrypoint: m.entrypoint_path().display().to_string(),
+            input_entity_types: m.contract.input_entity_types.clone(),
         }
     }
 }
