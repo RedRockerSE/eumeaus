@@ -1,12 +1,18 @@
 mod case_state;
+mod credential_state;
 mod entity_state;
+mod plugin_state;
 mod scan_state;
+mod trust_state;
 
 use case_state::{case_close, case_create, case_current, case_list, case_open, AppState};
+use credential_state::{credential_list, credential_remove, credential_set};
 use entity_state::{
     entity_add, entity_list, entity_merge, entity_show, entity_split, relationship_add,
 };
+use plugin_state::{plugin_install, plugin_list, plugin_verify};
 use scan_state::{scan_list, scan_run};
+use trust_state::{trust_add, trust_list, trust_remove};
 
 // G0 (SPEC.md §9.6): a trivial command that genuinely round-trips into
 // eumeaus-engine, proving the workspace dependency links correctly — not
@@ -55,6 +61,15 @@ pub fn run() {
             relationship_add,
             scan_run,
             scan_list,
+            plugin_list,
+            plugin_install,
+            plugin_verify,
+            credential_set,
+            credential_list,
+            credential_remove,
+            trust_add,
+            trust_list,
+            trust_remove,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

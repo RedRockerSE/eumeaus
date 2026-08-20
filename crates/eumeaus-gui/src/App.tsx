@@ -45,6 +45,18 @@ interface ScanSummary {
   completed_at_unix_ms: number | null;
 }
 
+interface PluginSummary {
+  name: string;
+  version: string;
+  signed: boolean;
+  entrypoint: string;
+}
+
+interface TrustedKey {
+  name: string;
+  public_key: string;
+}
+
 // G1 (SPEC.md §9.6): create/open/close a case from the GUI, backed by the
 // real keychain + SQLCipher path — the same eumeaus-engine::Case the CLI
 // uses, not a mock. One case open at a time in this window (case_create/
@@ -549,6 +561,267 @@ function ScanScreen() {
   );
 }
 
+// G5 (SPEC.md §9.6): plugin list/install/verify. Not case-scoped (a
+// plugins_dir is just a path) — unlike Entity/Scan screens, this one
+// doesn't need a case open at all.
+function PluginScreen() {
+  const [pluginsDir, setPluginsDir] = useState("");
+  const [plugins, setPlugins] = useState<PluginSummary[] | null>(null);
+  const [sourcePath, setSourcePath] = useState("");
+  const [verifyName, setVerifyName] = useState("");
+  const [verifyTrust, setVerifyTrust] = useState("");
+  const [verifyResult, setVerifyResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function list(e?: React.FormEvent) {
+    e?.preventDefault();
+    setError(null);
+    try {
+      setPlugins(await invoke<PluginSummary[]>("plugin_list", { pluginsDir }));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function install(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await invoke("plugin_install", { sourcePath, pluginsDir });
+      setSourcePath("");
+      await list();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function verify(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setVerifyResult(null);
+    try {
+      await invoke("plugin_verify", {
+        name: verifyName,
+        pluginsDir,
+        trust: verifyTrust || null,
+      });
+      setVerifyResult("valid");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  return (
+    <section>
+      <h2>Plugins</h2>
+      {error && <p style={{ color: "red" }}>{error}</p>}
+
+      <form onSubmit={list}>
+        <input
+          placeholder="Plugins directory"
+          value={pluginsDir}
+          onChange={(e) => setPluginsDir(e.currentTarget.value)}
+        />
+        <button type="submit">List</button>
+      </form>
+
+      {plugins && (
+        <ul>
+          {plugins.map((p) => (
+            <li key={p.name}>
+              {p.name} {p.version} ({p.signed ? "signed" : "unsigned"}) —{" "}
+              {p.entrypoint}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <form onSubmit={install}>
+        <h3>Install</h3>
+        <input
+          placeholder="Source directory (has plugin.toml)"
+          value={sourcePath}
+          onChange={(e) => setSourcePath(e.currentTarget.value)}
+        />
+        <button type="submit">Install</button>
+      </form>
+
+      <form onSubmit={verify}>
+        <h3>Verify</h3>
+        <input
+          placeholder="Plugin name"
+          value={verifyName}
+          onChange={(e) => setVerifyName(e.currentTarget.value)}
+        />
+        <input
+          placeholder="Trust store name"
+          value={verifyTrust}
+          onChange={(e) => setVerifyTrust(e.currentTarget.value)}
+        />
+        <button type="submit">Verify</button>
+        {verifyResult && <span> {verifyResult}</span>}
+      </form>
+    </section>
+  );
+}
+
+// G5: credential management, global to the OS user account (not case-
+// scoped) — a normal password <input> submitted through invoke() is the
+// GUI-native equivalent of the CLI's rpassword TTY prompt (see
+// credential_state.rs's doc for why that's not a shortcut around the
+// concern rpassword addresses).
+function CredentialScreen() {
+  const [names, setNames] = useState<string[] | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    setError(null);
+    try {
+      setNames(await invoke<string[]>("credential_list"));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function set(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await invoke("credential_set", { name: newName, value: newValue });
+      setNewName("");
+      setNewValue("");
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function remove(name: string) {
+    setError(null);
+    try {
+      await invoke("credential_remove", { name });
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  return (
+    <section>
+      <h2>Credentials</h2>
+      {error && <p style={{ color: "red" }}>{error}</p>}
+
+      <form onSubmit={set}>
+        <input
+          placeholder="Name"
+          value={newName}
+          onChange={(e) => setNewName(e.currentTarget.value)}
+        />
+        <input
+          type="password"
+          placeholder="Value"
+          value={newValue}
+          onChange={(e) => setNewValue(e.currentTarget.value)}
+        />
+        <button type="submit">Set</button>
+      </form>
+
+      {names && (
+        <ul>
+          {names.map((n) => (
+            <li key={n}>
+              {n} <button onClick={() => remove(n)}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+// G5: local trust store (SPEC.md §8 open question 2) — named public keys,
+// not secrets, so a plain file rather than the OS keychain.
+function TrustScreen() {
+  const [keys, setKeys] = useState<TrustedKey[] | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newKey, setNewKey] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    setError(null);
+    try {
+      setKeys(await invoke<TrustedKey[]>("trust_list"));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await invoke("trust_add", { name: newName, publicKey: newKey });
+      setNewName("");
+      setNewKey("");
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function remove(name: string) {
+    setError(null);
+    try {
+      await invoke("trust_remove", { name });
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  return (
+    <section>
+      <h2>Trust store</h2>
+      {error && <p style={{ color: "red" }}>{error}</p>}
+
+      <form onSubmit={add}>
+        <input
+          placeholder="Name"
+          value={newName}
+          onChange={(e) => setNewName(e.currentTarget.value)}
+        />
+        <input
+          placeholder="Public key (hex)"
+          value={newKey}
+          onChange={(e) => setNewKey(e.currentTarget.value)}
+        />
+        <button type="submit">Add</button>
+      </form>
+
+      {keys && (
+        <ul>
+          {keys.map((k) => (
+            <li key={k.name}>
+              {k.name}: {k.public_key}{" "}
+              <button onClick={() => remove(k.name)}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 // G0 (SPEC.md §9.6): fetch the taxonomy from eumeaus-engine via the
 // list_entity_types command, proving the IPC boundary works end to end
 // (frontend -> Tauri command -> eumeaus-engine -> back).
@@ -584,10 +857,13 @@ function App() {
   return (
     <main className="container">
       <h1>Eumeaus</h1>
-      <p>GUI scaffold (SPEC.md §9, milestone G4)</p>
+      <p>GUI scaffold (SPEC.md §9, milestone G5)</p>
       <CaseScreen current={currentCase} onChange={setCurrentCase} />
       {currentCase && <EntityScreen />}
       {currentCase && <ScanScreen />}
+      <PluginScreen />
+      <CredentialScreen />
+      <TrustScreen />
       <EntityTypesScreen />
     </main>
   );

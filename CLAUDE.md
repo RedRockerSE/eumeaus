@@ -100,17 +100,17 @@ released, and public (`CLI.md` is the full command reference). SPEC.md
 v0.1.0 is tagged and published (public repo) via
 `.github/workflows/release.yml` (tag push → Linux musl + Windows msvc
 archives + checksums → draft GitHub Release); `install.sh`/`install.ps1`
-fetch and verify from there — both tested end-to-end against the real
-release, which caught a real checksum-file newline bug (see
-`release.yml`'s Windows packaging step comment).
+fetch and verify from there — both tested end-to-end, which caught a
+real checksum-file newline bug (`release.yml`'s Windows packaging step).
 
 GUI (SPEC.md §9, `feat/gui-tauri` branch): design resolved (Tauri 2.x,
-React+TS, Linux+Windows only, `crates/` workspace). G0–G4 done, verified
-live: case lifecycle (G1), entity/fact browsing (G2), scan run with live
-progress against the real username-search plugin (G3, needed one
-additive engine API — `Case::resume_scan_with_progress`, §9.2), entity
-add/merge/split + relationship add (G4, same `audit_events` shape as a
-CLI-initiated merge). G5 is next.
+React+TS, Linux+Windows only, `crates/` workspace). G0–G5 done, each
+verified live: case lifecycle, entity/fact CRUD + merge/split, scan run
+with live progress (needed one additive engine API —
+`Case::resume_scan_with_progress`, §9.2 — against the real
+username-search plugin), and plugin/credential/trust management
+(`plugin_state.rs`/`credential_state.rs`/`trust_state.rs`, none
+case-scoped). G6 (packaging/signing/updater) is next and last.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/

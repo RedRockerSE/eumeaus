@@ -29,6 +29,9 @@ dirs.workspace = true
 # internally, but doesn't re-export it, so this is needed directly to
 # name tokio::sync::mpsc's types.
 tokio = { workspace = true, features = ["sync"] }
+# G5's plugin_verify (plugin_state.rs) needs to build a raw hex trusted
+# key into a VerifyingKey the same way eumeaus-cli's parse_hex_key does.
+ed25519-dalek.workspace = true
 
 [dev-dependencies]
 tempfile = "3.13.0"

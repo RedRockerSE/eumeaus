@@ -1396,6 +1396,7 @@ name = "eumeaus-gui"
 version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
+ "ed25519-dalek",
  "eumeaus-engine",
  "serde",
  "serde_json",
