@@ -6,6 +6,7 @@ members = [
     "crates/eumeaus-plugin-protocol",
     "crates/eumeaus-plugin-sdk",
     "crates/eumeaus-username-search-plugin",
+    "crates/eumeaus-email-lookup-plugin",
     "crates/eumeaus-cli",
     "crates/eumeaus-gui/src-tauri",
 ]
@@ -45,6 +46,11 @@ semver = "1.0.28"
 # directory for trusted_keys.toml.
 dirs = "5.0.1"
 sha2 = "0.10.9"
+# M-email-lookup: Gravatar/Libravatar's avatar-lookup API keys on an MD5
+# hash of the (trimmed, lowercased) email address — their own documented
+# contract, not this project's choice; sha2's RustCrypto sibling crate,
+# same Digest trait shape.
+md-5 = "0.10.6"
 base64 = "0.23.1"
 ed25519-dalek = "2.1.1"
 async-trait = "0.1.92"

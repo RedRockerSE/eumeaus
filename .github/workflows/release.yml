@@ -55,7 +55,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} --bin eumeaus --bin eumeaus-username-search-plugin
+        run: cargo build --release --target ${{ matrix.target }} --bin eumeaus --bin eumeaus-username-search-plugin --bin eumeaus-email-lookup-plugin
 
       - name: Package (Linux)
         if: matrix.archive_ext == 'tar.gz'
@@ -66,15 +66,19 @@ jobs:
           stage="eumeaus-${version}-${{ matrix.target }}"
           bin_dir="target/${{ matrix.target }}/release"
 
-          mkdir -p "$stage/plugins/username-search"
+          mkdir -p "$stage/plugins/username-search" "$stage/plugins/email-lookup"
           cp "$bin_dir/eumeaus" "$stage/"
           cp "$bin_dir/eumeaus-username-search-plugin" "$stage/plugins/username-search/"
+          cp "$bin_dir/eumeaus-email-lookup-plugin" "$stage/plugins/email-lookup/"
           # entrypoint rewritten relative (portable to wherever this gets
           # unpacked) — the shipped plugin.toml's own entrypoint is an
           # illustrative absolute path, not meant for a real install.
           sed 's#^entrypoint = .*#entrypoint = "eumeaus-username-search-plugin"#' \
             crates/eumeaus-username-search-plugin/plugin.toml \
             > "$stage/plugins/username-search/plugin.toml"
+          sed 's#^entrypoint = .*#entrypoint = "eumeaus-email-lookup-plugin"#' \
+            crates/eumeaus-email-lookup-plugin/plugin.toml \
+            > "$stage/plugins/email-lookup/plugin.toml"
           cp LICENSE-MIT LICENSE-APACHE CLI.md README.md "$stage/"
 
           tar czf "${stage}.tar.gz" "$stage"
@@ -90,11 +94,16 @@ jobs:
           $binDir = "target/${{ matrix.target }}/release"
 
           New-Item -ItemType Directory -Path "$stage/plugins/username-search" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$stage/plugins/email-lookup" -Force | Out-Null
           Copy-Item "$binDir/eumeaus.exe" "$stage/"
           Copy-Item "$binDir/eumeaus-username-search-plugin.exe" "$stage/plugins/username-search/"
+          Copy-Item "$binDir/eumeaus-email-lookup-plugin.exe" "$stage/plugins/email-lookup/"
           (Get-Content crates/eumeaus-username-search-plugin/plugin.toml) `
             -replace '^entrypoint = .*', 'entrypoint = "eumeaus-username-search-plugin.exe"' |
             Set-Content "$stage/plugins/username-search/plugin.toml"
+          (Get-Content crates/eumeaus-email-lookup-plugin/plugin.toml) `
+            -replace '^entrypoint = .*', 'entrypoint = "eumeaus-email-lookup-plugin.exe"' |
+            Set-Content "$stage/plugins/email-lookup/plugin.toml"
           Copy-Item LICENSE-MIT,LICENSE-APACHE,CLI.md,README.md "$stage/"
 
           # "$stage.zip" would be parsed as member access ($stage.zip

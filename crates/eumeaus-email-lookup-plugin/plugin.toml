@@ -1,0 +1,42 @@
+# Reference manifest for the shipped email-lookup plugin. Not used directly
+# by tests — those construct their own manifest pointing `entrypoint` at
+# wherever `cargo build`/`cargo test` actually put the compiled binary, and
+# sign it fresh (see tests/, eumeaus-cli's e2e test). This file exists to
+# show the real, shipped shape of the pair this crate produces: this
+# manifest sitting next to its binary. Mirrors
+# eumeaus-username-search-plugin/plugin.toml's own reference-manifest
+# convention.
+#
+# `signature` is intentionally left blank here: it covers
+# "{name}\n{version}\n{sha256(entrypoint binary)}" (see
+# eumeaus-plugin-host/src/signature.rs), so a valid one can only be
+# produced against this exact compiled artifact — computing it belongs to
+# the release/packaging step that builds and ships that artifact, not to
+# something checked into source control next to source that hasn't been
+# built yet.
+
+[plugin]
+name = "email-lookup"
+version = "0.1.0"
+description = "Checks whether an email address has a registered Gravatar/Libravatar avatar profile"
+author = "Eumeaus Core Team"
+signature = ""
+
+[compatibility]
+engine_min = "0.1.0"
+engine_max = "0.x"
+protocol_version = "1"
+
+[contract]
+input_entity_types = ["Email"]
+output_entity_types = ["OnlineAccount"]
+output_relationship_types = ["HasAccount"]
+
+[permissions]
+network = true
+requested_credentials = []
+
+[execution]
+entrypoint = "./eumeaus-email-lookup-plugin"
+default_rate_limit_per_sec = 5
+default_timeout_ms = 8000

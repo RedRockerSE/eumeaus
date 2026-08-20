@@ -31,6 +31,9 @@ before merge.
 - `crates/eumeaus-username-search-plugin` — the real v1 PoC plugin (M5): a
   small Sherlock-equivalent, built on the SDK. A real shipped `[[bin]]`,
   not a test fixture — `cargo build` produces it normally.
+- `crates/eumeaus-email-lookup-plugin` — a second real plugin, same
+  shipped-`[[bin]]` treatment: checks Gravatar/Libravatar for a
+  registered avatar (MD5-of-email lookup, no API key).
 - `crates/eumeaus-cli` — thin CLI wrapper over the engine API; also the
   end-to-end test surface (`crates/eumeaus-cli/tests/`), including the v1
   proof (`e2e_v1_proof.rs`, SPEC.md §6).
@@ -95,23 +98,20 @@ before merge.
 SPEC.md §7's milestones (M0–M6) are done — v1 CLI complete, released,
 public (`CLI.md` is the full reference); §8.1–8.7 resolved, §8.8 has a
 design (§9). v0.1.0 is tagged/published via `.github/workflows/
-release.yml` (tag push → Linux musl + Windows msvc archives + checksums
-→ draft Release); `install.sh`/`install.ps1` fetch/verify from there,
-both tested end-to-end (a real checksum-newline bug was caught this way).
+release.yml` (tag push → archives + checksums → draft Release, bundling
+both plugins below); `install.sh`/`install.ps1` fetch/verify from there.
 
-GUI (SPEC.md §9): design resolved (Tauri 2.x, React+TS, Linux+Windows
-only, `crates/` workspace). G0–G6 done; `gui-v0.1.0`/`gui-v0.1.1`
-tagged/published (unsigned — Windows Authenticode deferred). Updater
-verified live end-to-end on `gui-v0.1.1`: a running v0.1.0 instance
-detected, downloaded, verified, installed, relaunched into it. UX
-redesign (claude.ai/design handover, merged) replaced G0–G6's flat
-forms: custom titlebar, sidebar screens (Overview/Entities/Graph/Scans/
-Plugins/Settings), all real backend commands, no mock data — see
-`api.ts`/`entityStyle.ts`. Graph uses a real circular layout (no
-force-directed dep exists); Launcher's "recent cases" is a real
-directory browser (`case_list`, no MRU tracking backend-side). Report
-export + verify (`report_state.rs`) lives on Overview, wrapping the
-CLI's own `case export`/`report verify` calls.
+GUI (SPEC.md §9): Tauri 2.x, React+TS, Linux+Windows only, `crates/`
+workspace. G0–G6 done; `gui-v0.1.0`/`gui-v0.1.1` tagged/published
+(unsigned — Windows Authenticode deferred). Updater verified live
+end-to-end on `gui-v0.1.1`: a running v0.1.0 instance detected,
+downloaded, verified, installed, relaunched into it. UX redesign
+(claude.ai/design handover, merged) replaced G0–G6's flat forms: custom
+titlebar, sidebar screens (Overview/Entities/Graph/Scans/Plugins/
+Settings), all real backend commands, no mock data — see `api.ts`/
+`entityStyle.ts`. Graph: real circular layout (no force-directed dep).
+Launcher's "recent cases": real directory browser, no backend MRU
+tracking. Report export + verify (`report_state.rs`) lives on Overview.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/`find_entity_by_key`/
