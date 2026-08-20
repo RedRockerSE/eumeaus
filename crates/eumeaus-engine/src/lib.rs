@@ -367,6 +367,29 @@ pub struct ScanSummary {
     pub completed_at_unix_ms: Option<i64>,
 }
 
+/// One `scan_plugin_runs` status transition (PENDING→RUNNING→SUCCESS/
+/// TIMEOUT/ERROR), for a caller that wants to observe a scan *while* it
+/// runs rather than only after — added for the GUI (SPEC.md §9.6 G3),
+/// which can't just poll `scan_status` mid-scan the way a second CLI
+/// invocation could: [`Case::resume_scan`] holds `Case`'s one connection
+/// for the whole scan, so a poller sharing that `Case` would just queue
+/// up behind it. [`Case::resume_scan_with_progress`] sends one of these
+/// synchronously, in-process, at the same point [`Case::resume_scan`]
+/// would otherwise silently write the row — no new DB connection, no
+/// change to `resume_scan`'s own behavior or any existing caller.
+#[derive(Debug, Clone)]
+pub struct ScanProgressEvent {
+    pub scan_id: ScanId,
+    pub plugin_name: String,
+    /// `scan_plugin_runs.status` is a plain string engine-wide (RUNNING /
+    /// SUCCESS / TIMEOUT / ERROR), not a Rust enum — matches that rather
+    /// than inventing one just for this event.
+    pub status: String,
+    pub error_message: Option<String>,
+}
+
+pub type ScanProgressSender = tokio::sync::mpsc::UnboundedSender<ScanProgressEvent>;
+
 #[derive(Debug, Clone)]
 pub struct PluginRef {
     pub name: String,

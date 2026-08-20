@@ -62,8 +62,6 @@ before merge.
   chosen set of facts. Either way the *facts' own data* (source, provenance,
   confidence) is never touched — only which entity currently owns them —
   and both are recorded as `audit_events` rows, never mutating a fact.
-- Credentials are never passed via subprocess argv or env vars (visible to
-  other processes) — injected into the gRPC request body by the plugin host.
 - Touching the plugin protocol/host/SDK, writing a plugin (real or test
   fixture), or scan resumability internals: load the `plugin-development`
   skill first — subprocess/gRPC/async gotchas, signing, and the
@@ -71,7 +69,8 @@ before merge.
 - Credentials (`eumeaus-plugin-host/src/credentials.rs`) live in a
   *separate* OS-keychain service (`"eumeaus-credentials"`) from case
   encryption keys (`"eumeaus"`, `keystore.rs`), global to the OS user, not
-  scoped to a case. Injected into `CheckRequest.resolved_credentials`
+  scoped to a case — never passed via subprocess argv/env (visible to
+  other processes), only injected into `CheckRequest.resolved_credentials`
   synchronously before the scan's tokio runtime starts; a missing declared
   credential marks just that plugin's run `ERROR`, not the whole scan.
 - `credential set`'s interactive prompt (`rpassword`) needs a real TTY —
@@ -106,10 +105,11 @@ release, which caught a real checksum-file newline bug (see
 `release.yml`'s Windows packaging step comment).
 
 GUI (SPEC.md §9, `feat/gui-tauri` branch): design resolved (Tauri 2.x,
-React+TS, Linux+Windows only, `crates/` workspace). G0–G2 done and
-verified live via `tauri dev`: case create/open/close (`case_state.rs`,
-G1), read-only entity/fact browsing (`entity_state.rs`, G2). G3 (scan
-run + live progress) is next.
+React+TS, Linux+Windows only, `crates/` workspace). G0–G3 done, verified
+live against the real username-search plugin: case lifecycle (G1),
+read-only entity/fact browsing (G2), scan run with live per-plugin
+progress (G3) — needed one real, additive engine API
+(`Case::resume_scan_with_progress`, SPEC.md §9.2). G4 is next.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/
@@ -139,8 +139,8 @@ lists `entity_attributes`); `eumeaus-plugin-host`'s async API and
   `sqlcipher_export()` (`ATTACH DATABASE ... KEY ...`); it returns `NULL`,
   not a row count (`Option<i64>`). Its `KEY` clause differs by source: a
   passphrase (`Portable`) binds as a normal parameter, but the keychain's
-  raw hex key needs literal `x'<hex>'` blob syntax written directly in the
-  SQL — a bound parameter there just parses as a wrong passphrase.
+  raw hex key needs literal `x'<hex>'` blob syntax in the SQL text — a
+  bound parameter there just parses as a wrong passphrase.
 - `eumeaus-gui`'s Rust side (`src-tauri`) won't even `cargo check` on
   Linux without real system dev headers first (`libwebkit2gtk-4.1-dev`,
   `libsoup-3.0-dev`, `libjavascriptcoregtk-4.1-dev`, `libayatana-

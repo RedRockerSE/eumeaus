@@ -502,7 +502,21 @@ impl Case {
     }
 
     pub fn resume_scan(&mut self, scan_id: ScanId) -> Result<(), EngineError> {
-        crate::scan::resume(&mut self.conn, scan_id.0)
+        crate::scan::resume(&mut self.conn, scan_id.0, None)
+    }
+
+    /// Same as [`Case::resume_scan`], but also sends a
+    /// [`crate::ScanProgressEvent`] on `progress` at each
+    /// `scan_plugin_runs` status transition, synchronously, as it happens
+    /// — added for the GUI (SPEC.md §9.6 G3), which has no other way to
+    /// observe a scan mid-flight (see [`crate::ScanProgressEvent`]'s doc
+    /// for why polling `scan_status` from elsewhere doesn't work here).
+    pub fn resume_scan_with_progress(
+        &mut self,
+        scan_id: ScanId,
+        progress: &crate::ScanProgressSender,
+    ) -> Result<(), EngineError> {
+        crate::scan::resume(&mut self.conn, scan_id.0, Some(progress))
     }
 
     pub fn scan_status(&self, scan_id: ScanId) -> Result<ScanStatus, EngineError> {

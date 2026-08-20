@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import "./App.css";
 
 interface CaseInfo {
@@ -27,6 +28,21 @@ interface AttributeRecord {
 
 interface EntityDetail extends EntitySummary {
   attributes: AttributeRecord[];
+}
+
+interface ScanProgress {
+  scan_id: string;
+  plugin_name: string;
+  status: string;
+  error_message: string | null;
+}
+
+interface ScanSummary {
+  id: string;
+  status: string;
+  target_entity_id: string;
+  started_at_unix_ms: number | null;
+  completed_at_unix_ms: number | null;
 }
 
 // G1 (SPEC.md §9.6): create/open/close a case from the GUI, backed by the
@@ -245,6 +261,127 @@ function EntityScreen() {
   );
 }
 
+// G3 (SPEC.md §9.6): scan run + live progress. scan_run returns as soon
+// as the scan is created; per-plugin RUNNING/SUCCESS/TIMEOUT/ERROR
+// transitions arrive afterwards as "scan-progress" events (scan_state.rs)
+// rather than through the command's own return value.
+function ScanScreen() {
+  const [pluginsDir, setPluginsDir] = useState("");
+  const [plugin, setPlugin] = useState("");
+  const [targetType, setTargetType] = useState("Username");
+  const [targetValue, setTargetValue] = useState("");
+  const [activeScanId, setActiveScanId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ScanProgress[]>([]);
+  const [scans, setScans] = useState<ScanSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const activeScanIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const unlisten = listen<ScanProgress>("scan-progress", (event) => {
+      if (event.payload.scan_id !== activeScanIdRef.current) return;
+      setProgress((prev) => [...prev, event.payload]);
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
+
+  async function run(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setProgress([]);
+    // A blank plugins directory reaches Case::create_scan as Path::new("")
+    // and fails with an engine error that reads oddly with nothing to
+    // fill its {0} — caught during G3's own live testing. Catch it here
+    // with a clearer message instead.
+    if (!pluginsDir.trim() || !targetType.trim() || !targetValue.trim()) {
+      setError("Plugins directory, target type, and target key are all required.");
+      return;
+    }
+    try {
+      const scanId = await invoke<string>("scan_run", {
+        pluginsDir,
+        plugin: plugin
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean),
+        targetType,
+        targetValue,
+      });
+      activeScanIdRef.current = scanId;
+      setActiveScanId(scanId);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function refreshScans() {
+    setError(null);
+    try {
+      setScans(await invoke<ScanSummary[]>("scan_list"));
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  return (
+    <section>
+      <h2>Scan</h2>
+      {error && <p style={{ color: "red" }}>{error}</p>}
+
+      <form onSubmit={run}>
+        <input
+          placeholder="Plugins directory"
+          value={pluginsDir}
+          onChange={(e) => setPluginsDir(e.currentTarget.value)}
+        />
+        <input
+          placeholder="Plugin name(s), comma-separated (blank = all compatible)"
+          value={plugin}
+          onChange={(e) => setPlugin(e.currentTarget.value)}
+        />
+        <input
+          placeholder="Target entity type"
+          value={targetType}
+          onChange={(e) => setTargetType(e.currentTarget.value)}
+        />
+        <input
+          placeholder="Target entity key"
+          value={targetValue}
+          onChange={(e) => setTargetValue(e.currentTarget.value)}
+        />
+        <button type="submit">Run scan</button>
+      </form>
+
+      {activeScanId && (
+        <div>
+          <h3>Scan {activeScanId}</h3>
+          {progress.length === 0 && <p>Waiting for progress…</p>}
+          <ul>
+            {progress.map((p, i) => (
+              <li key={i}>
+                {p.plugin_name}: {p.status}
+                {p.error_message ? ` (${p.error_message})` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <button onClick={refreshScans}>Refresh scan list</button>
+      {scans && (
+        <ul>
+          {scans.map((s) => (
+            <li key={s.id}>
+              {s.id}: {s.status}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 // G0 (SPEC.md §9.6): fetch the taxonomy from eumeaus-engine via the
 // list_entity_types command, proving the IPC boundary works end to end
 // (frontend -> Tauri command -> eumeaus-engine -> back).
@@ -280,9 +417,10 @@ function App() {
   return (
     <main className="container">
       <h1>Eumeaus</h1>
-      <p>GUI scaffold (SPEC.md §9, milestone G2)</p>
+      <p>GUI scaffold (SPEC.md §9, milestone G3)</p>
       <CaseScreen current={currentCase} onChange={setCurrentCase} />
       {currentCase && <EntityScreen />}
+      {currentCase && <ScanScreen />}
       <EntityTypesScreen />
     </main>
   );

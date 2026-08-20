@@ -194,7 +194,7 @@ pub(crate) fn start(
         config,
         &trust_policy,
     )?;
-    resume(conn, scan_id.0)?;
+    resume(conn, scan_id.0, None)?;
     Ok(scan_id)
 }
 
@@ -203,7 +203,11 @@ pub(crate) fn start(
 /// resume` picks up only the incomplete work"). A crashed prior run's
 /// `RUNNING` rows are reconciled to `PENDING` on [`crate::Case::open`],
 /// before this ever sees them.
-pub(crate) fn resume(conn: &mut Connection, scan_id: Uuid) -> Result<(), EngineError> {
+pub(crate) fn resume(
+    conn: &mut Connection,
+    scan_id: Uuid,
+    progress: Option<&crate::ScanProgressSender>,
+) -> Result<(), EngineError> {
     let (target_entity_id, config_json): (String, String) = conn
         .query_row(
             "SELECT target_entity_id, config_snapshot FROM scans WHERE id = ?1",
@@ -252,6 +256,7 @@ pub(crate) fn resume(conn: &mut Connection, scan_id: Uuid) -> Result<(), EngineE
                 "ERROR",
                 Some(now_unix_ms()),
                 Some("plugin no longer discoverable/compatible at resume time"),
+                progress,
             )?;
         }
     }
@@ -269,6 +274,7 @@ pub(crate) fn resume(conn: &mut Connection, scan_id: Uuid) -> Result<(), EngineE
         snapshot.worker_pool,
         snapshot.rate_limit_per_sec,
         trust_policy,
+        progress,
     )?;
     finalize_scan_status(conn, scan_id)?;
     Ok(())
@@ -373,6 +379,7 @@ struct PluginOutcome {
 /// (see the `plugin-development` skill). A plugin whose credentials can't
 /// be resolved is marked `ERROR` immediately and excluded from the run,
 /// rather than aborting the whole scan (SPEC.md §5).
+#[allow(clippy::too_many_arguments)]
 fn run_to_completion(
     conn: &mut Connection,
     scan_id: Uuid,
@@ -381,6 +388,7 @@ fn run_to_completion(
     worker_pool: u32,
     rate_limit_per_sec: Option<u32>,
     trust_policy: TrustPolicy,
+    progress: Option<&crate::ScanProgressSender>,
 ) -> Result<(), EngineError> {
     let mut runnable = Vec::with_capacity(manifests.len());
     for manifest in manifests {
@@ -393,6 +401,7 @@ fn run_to_completion(
                 "ERROR",
                 Some(now_unix_ms()),
                 Some(&e.to_string()),
+                progress,
             )?,
         }
     }
@@ -406,9 +415,11 @@ fn run_to_completion(
         worker_pool as usize,
         rate_limit_per_sec,
         trust_policy,
+        progress,
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_to_completion_async(
     conn: &mut Connection,
     scan_id: Uuid,
@@ -417,6 +428,7 @@ async fn run_to_completion_async(
     worker_pool: usize,
     rate_limit_per_sec: Option<u32>,
     trust_policy: TrustPolicy,
+    progress: Option<&crate::ScanProgressSender>,
 ) -> Result<(), EngineError> {
     let min_interval = rate_limit_per_sec
         .filter(|&n| n > 0)
@@ -433,7 +445,15 @@ async fn run_to_completion_async(
         let Some((manifest, credentials)) = pending.next() else {
             return Ok(false);
         };
-        set_run_status(conn, scan_id, &manifest.plugin.name, "RUNNING", None, None)?;
+        set_run_status(
+            conn,
+            scan_id,
+            &manifest.plugin.name,
+            "RUNNING",
+            None,
+            None,
+            progress,
+        )?;
         let request = build_check_request(scan_id, target_entity, &manifest, credentials);
         *last_dispatch = Some(Instant::now());
         dispatch(join_set, manifest, request, trust_policy.clone());
@@ -456,7 +476,7 @@ async fn run_to_completion_async(
 
     while let Some(joined) = join_set.join_next().await {
         let outcome = joined.expect("plugin worker task panicked");
-        handle_outcome(conn, scan_id, target_entity, outcome)?;
+        handle_outcome(conn, scan_id, target_entity, outcome, progress)?;
 
         if let Some(interval) = min_interval {
             if let Some(prev) = last_dispatch {
@@ -528,6 +548,7 @@ fn handle_outcome(
     scan_id: Uuid,
     target_entity: &Entity,
     outcome: PluginOutcome,
+    progress: Option<&crate::ScanProgressSender>,
 ) -> Result<(), EngineError> {
     let now = now_unix_ms();
     match outcome.result {
@@ -549,6 +570,7 @@ fn handle_outcome(
                 "SUCCESS",
                 Some(now),
                 None,
+                progress,
             )
         }
         Err(HostError::Timeout(_, _)) => set_run_status(
@@ -558,6 +580,7 @@ fn handle_outcome(
             "TIMEOUT",
             Some(now),
             Some("plugin invocation timed out"),
+            progress,
         ),
         Err(e) => {
             let message = e.to_string();
@@ -568,11 +591,13 @@ fn handle_outcome(
                 "ERROR",
                 Some(now),
                 Some(&message),
+                progress,
             )
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn set_run_status(
     conn: &Connection,
     scan_id: Uuid,
@@ -580,6 +605,7 @@ fn set_run_status(
     status: &str,
     completed_at: Option<i64>,
     error_message: Option<&str>,
+    progress: Option<&crate::ScanProgressSender>,
 ) -> Result<(), EngineError> {
     if status == "RUNNING" {
         conn.execute(
@@ -599,6 +625,17 @@ fn set_run_status(
                 plugin_name
             ],
         )?;
+    }
+    // Best-effort: a closed/dropped receiver (no one listening) just
+    // means send() returns an error, which we ignore — the DB write
+    // above already succeeded, and that's the row of record.
+    if let Some(sender) = progress {
+        let _ = sender.send(crate::ScanProgressEvent {
+            scan_id: crate::ScanId(scan_id),
+            plugin_name: plugin_name.to_string(),
+            status: status.to_string(),
+            error_message: error_message.map(str::to_string),
+        });
     }
     Ok(())
 }
@@ -946,6 +983,53 @@ default_timeout_ms = {default_timeout_ms}
             rel_count, 1,
             "the HasAccount relationship should be ingested too"
         );
+
+        keystore::delete_key(case.id()).ok();
+    }
+
+    // SPEC.md §9.6 G3's whole premise: resume_scan_with_progress sends a
+    // real-time event for each status transition, in-process, without
+    // needing a second connection to the case file — see
+    // ScanProgressEvent's doc for why that matters (resume_scan holds the
+    // Case's one connection for the whole scan, so nothing else could
+    // poll scan_status mid-flight).
+    #[test]
+    fn resume_scan_with_progress_reports_running_then_success_in_order() {
+        let base = tempfile::tempdir().unwrap();
+        let plugins_dir = base.path().join("plugins");
+        write_manifest(&plugins_dir, "scan-ok", "scan_ok", 2000);
+
+        let (mut case, target_id) = new_case_with_target(&base.path().join("case"), "progress");
+        let scan_id = case
+            .create_scan(
+                &plugins_dir,
+                vec![],
+                TargetEntity { id: target_id },
+                ScanConfig::default(),
+                &TrustPolicy::AllowUnsigned,
+            )
+            .unwrap();
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        case.resume_scan_with_progress(scan_id, &tx).unwrap();
+        drop(tx);
+
+        let mut events = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            events.push(event);
+        }
+
+        let statuses: Vec<&str> = events
+            .iter()
+            .filter(|e| e.plugin_name == "scan-ok")
+            .map(|e| e.status.as_str())
+            .collect();
+        assert_eq!(
+            statuses,
+            vec!["RUNNING", "SUCCESS"],
+            "expected RUNNING then SUCCESS, in that order, for the one plugin in this scan"
+        );
+        assert!(events.iter().all(|e| e.scan_id == scan_id));
 
         keystore::delete_key(case.id()).ok();
     }
