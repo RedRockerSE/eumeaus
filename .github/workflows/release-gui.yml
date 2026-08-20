@@ -32,6 +32,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -75,7 +77,7 @@ jobs:
           # A human reviews and publishes manually — same reasoning as
           # release.yml's draft: true for the CLI.
           releaseDraft: true
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           # NSIS (setup.exe) over WiX (.msi) for the updater artifact —
           # better silent-update support, per Tauri's own guidance.
           updaterJsonPreferNsis: true
