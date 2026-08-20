@@ -1,6 +1,7 @@
 mod case_state;
 mod credential_state;
 mod entity_state;
+mod overview_state;
 mod plugin_state;
 mod scan_state;
 mod trust_state;
@@ -9,7 +10,9 @@ use case_state::{case_close, case_create, case_current, case_list, case_open, Ap
 use credential_state::{credential_list, credential_remove, credential_set};
 use entity_state::{
     entity_add, entity_list, entity_merge, entity_show, entity_split, relationship_add,
+    relationship_list,
 };
+use overview_state::{audit_list, case_stats};
 use plugin_state::{plugin_install, plugin_list, plugin_verify};
 use scan_state::{scan_list, scan_run};
 use trust_state::{trust_add, trust_list, trust_remove};
@@ -72,6 +75,9 @@ pub fn run() {
             entity_merge,
             entity_split,
             relationship_add,
+            relationship_list,
+            case_stats,
+            audit_list,
             scan_run,
             scan_list,
             plugin_list,

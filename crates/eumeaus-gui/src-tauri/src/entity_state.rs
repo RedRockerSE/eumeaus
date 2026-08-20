@@ -20,7 +20,8 @@
 use std::sync::{Arc, Mutex};
 
 use eumeaus_engine::{
-    Actor, Attribute, Case, EntityFilter, EntityId, EntityType, Provenance, RelationshipType,
+    Actor, Attribute, Case, EntityFilter, EntityId, EntityType, Provenance, Relationship,
+    RelationshipType,
 };
 use serde::{Deserialize, Serialize};
 
@@ -296,6 +297,45 @@ pub async fn relationship_add(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize, Debug)]
+pub struct RelationshipDto {
+    pub id: String,
+    pub from: String,
+    pub to: String,
+    pub relationship_type: String,
+    pub created_at_unix_ms: i64,
+}
+
+impl From<Relationship> for RelationshipDto {
+    fn from(r: Relationship) -> Self {
+        RelationshipDto {
+            id: r.id.to_string(),
+            from: r.from.to_string(),
+            to: r.to.to_string(),
+            relationship_type: r.relationship_type.to_string(),
+            created_at_unix_ms: r.created_at_unix_ms,
+        }
+    }
+}
+
+fn do_relationship_list(cell: &Arc<Mutex<Option<Case>>>) -> Result<Vec<RelationshipDto>, String> {
+    let guard = cell.lock().unwrap();
+    let case = guard.as_ref().ok_or(NO_CASE_OPEN)?;
+    case.list_relationships()
+        .map(|rels| rels.into_iter().map(RelationshipDto::from).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn relationship_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<RelationshipDto>, String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_relationship_list(&cell))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -586,5 +626,29 @@ mod tests {
             .unwrap_err(),
             NO_CASE_OPEN
         );
+        assert_eq!(do_relationship_list(&cell).unwrap_err(), NO_CASE_OPEN);
+    }
+
+    #[test]
+    fn relationship_list_shows_a_relationship_added_via_the_same_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-graph-rels").unwrap();
+        let a = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let b = case
+            .add_entity(EntityType::Organization, None, vec![], manual_provenance())
+            .unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let rel_id =
+            do_relationship_add(&cell, &a.to_string(), &b.to_string(), "MemberOf", vec![]).unwrap();
+
+        let rels = do_relationship_list(&cell).unwrap();
+        assert_eq!(rels.len(), 1);
+        assert_eq!(rels[0].id, rel_id);
+        assert_eq!(rels[0].from, a.to_string());
+        assert_eq!(rels[0].to, b.to_string());
+        assert_eq!(rels[0].relationship_type, "MemberOf");
     }
 }
