@@ -45,6 +45,79 @@ pub fn install(source_dir: &Path, plugins_dir: &Path) -> Result<PluginManifest, 
     Ok(manifest)
 }
 
+/// Signs `manifest` (over its name/version/entrypoint-binary-hash, per
+/// `eumeaus-plugin-host`'s `signature::sign` — see that module for why
+/// exactly that payload, not the whole manifest) with a hex-encoded
+/// Ed25519 signing key, and writes the resulting base64 signature into
+/// its `plugin.toml` on disk — replacing an existing `signature = "..."`
+/// line (including the empty-placeholder convention both shipped
+/// reference manifests ship with) or inserting one if none exists.
+/// Returns the signature and the signer's public key (hex), the same
+/// "print it so the investigator can `trust add` it" convention
+/// `report::sign_export` uses — this is the CLI tool `signature.rs`'s own
+/// doc comment already anticipated ("not just test scaffolding — what a
+/// future `eumeaus plugin sign` tool would call").
+pub fn sign(
+    manifest: &PluginManifest,
+    signing_key_hex: &str,
+) -> Result<(String, String), EngineError> {
+    let signing_key =
+        eumeaus_plugin_host::detached_signature::signing_key_from_hex(signing_key_hex.trim())?;
+    let signature = eumeaus_plugin_host::sign(&signing_key, manifest)?;
+    write_signature_into_manifest_file(manifest, &signature)?;
+
+    let public_key_hex = signing_key
+        .verifying_key()
+        .to_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    Ok((signature, public_key_hex))
+}
+
+/// Rewrites `manifest`'s `plugin.toml` in place as plain text (same
+/// approach `.github/workflows/release.yml` already uses to rewrite
+/// `entrypoint` for a packaged release — not a TOML serializer round
+/// trip, which isn't guaranteed to preserve comments/formatting a plugin
+/// author wrote by hand).
+fn write_signature_into_manifest_file(
+    manifest: &PluginManifest,
+    signature: &str,
+) -> Result<(), EngineError> {
+    let path = manifest.manifest_dir.join("plugin.toml");
+    let text = fs::read_to_string(&path)?;
+
+    let mut lines: Vec<String> = Vec::new();
+    let mut replaced = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with("signature =") {
+            lines.push(format!("signature = \"{signature}\""));
+            replaced = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    if !replaced {
+        let mut with_insertion = Vec::with_capacity(lines.len() + 1);
+        let mut inserted = false;
+        for line in lines {
+            let is_version_line = !inserted && line.trim_start().starts_with("version =");
+            with_insertion.push(line);
+            if is_version_line {
+                with_insertion.push(format!("signature = \"{signature}\""));
+                inserted = true;
+            }
+        }
+        lines = with_insertion;
+    }
+
+    let mut new_text = lines.join("\n");
+    new_text.push('\n');
+    fs::write(&path, new_text)?;
+    Ok(())
+}
+
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
@@ -171,5 +244,70 @@ default_timeout_ms = 2000
 
         let err = install(&plugin_dir, plugins_dir.path()).unwrap_err();
         assert!(matches!(err, EngineError::PluginAlreadyInstalled(_)));
+    }
+
+    fn hex_key(key: &SigningKey) -> String {
+        key.to_bytes().iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn hex_pubkey(key: &SigningKey) -> String {
+        key.verifying_key()
+            .to_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    #[test]
+    fn sign_writes_a_signature_that_verifies_and_the_returned_public_key_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        write_manifest(dir.path(), "to-sign", None);
+        let manifest = discover(dir.path()).unwrap().remove(0);
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let (signature, public_key_hex) = sign(&manifest, &hex_key(&signing_key)).unwrap();
+        assert!(!signature.is_empty());
+        assert_eq!(public_key_hex, hex_pubkey(&signing_key));
+
+        // Re-discovering picks up the signature this just wrote to disk.
+        let resigned_manifest = discover(dir.path()).unwrap().remove(0);
+        assert_eq!(
+            resigned_manifest.plugin.signature.as_deref(),
+            Some(signature.as_str())
+        );
+        verify(
+            &resigned_manifest,
+            &TrustPolicy::RequireSignature {
+                trusted_key: signing_key.verifying_key(),
+            },
+        )
+        .expect("a freshly signed manifest should verify against its own signer's key");
+    }
+
+    #[test]
+    fn sign_replaces_the_shipped_empty_placeholder_signature_line() {
+        // Mirrors the convention eumeaus-username-search-plugin/plugin.toml
+        // and eumeaus-email-lookup-plugin/plugin.toml both ship with:
+        // `signature = ""` as a visible "not signed yet" placeholder,
+        // rather than omitting the field entirely.
+        let dir = tempfile::tempdir().unwrap();
+        write_manifest(dir.path(), "placeholder", Some(""));
+        let manifest = discover(dir.path()).unwrap().remove(0);
+        assert_eq!(
+            manifest.plugin.signature, None,
+            "empty placeholder parses as unsigned"
+        );
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        sign(&manifest, &hex_key(&signing_key)).unwrap();
+
+        let text = fs::read_to_string(dir.path().join("placeholder/plugin.toml")).unwrap();
+        assert_eq!(
+            text.lines()
+                .filter(|l| l.trim_start().starts_with("signature ="))
+                .count(),
+            1,
+            "exactly one signature line, not a duplicate appended alongside the old one"
+        );
     }
 }

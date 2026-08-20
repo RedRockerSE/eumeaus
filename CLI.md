@@ -412,12 +412,9 @@ plugin in that scan to carry a valid signature against it instead (refused
 otherwise) — or `--trust <name>`, naming a key already added via `eumeaus
 trust add` (see the [`trust`](#trust) section below), so you don't have to
 paste the same 64 hex characters into every `scan run`/`plugin verify`.
-The two flags are mutually exclusive. There's currently no `eumeaus plugin
-sign` command — computing a manifest's `signature` field means calling
-`eumeaus_plugin_host::sign` programmatically (see
-`eumeaus-plugin-host/src/signature.rs` and any test's
-`write_signed_manifest` helper for the exact pattern); wiring that up as a
-CLI subcommand is a natural next step, not yet done.
+The two flags are mutually exclusive. Produce a manifest's `signature`
+field with `eumeaus plugin sign` (see the [`plugin`](#plugin) section
+below).
 
 ### `credential`
 
@@ -475,6 +472,7 @@ $ eumeaus --case acme-investigation.eum audit show --entity f8bac901-2693-45ed-a
 eumeaus plugin list [--plugins-dir <dir>] [--installed|--available]
 eumeaus plugin install <path> [--plugins-dir <dir>]
 eumeaus plugin verify <name> (--trusted-key <hex> | --trust <name>) [--plugins-dir <dir>]
+eumeaus plugin sign <name> --signing-key-file <path> [--plugins-dir <dir>]
 ```
 
 `--plugins-dir` defaults to `./plugins` for all three, same as `scan run`.
@@ -508,12 +506,30 @@ run` performs before loading a plugin, run standalone. Exactly one of
 `--trusted-key`/`--trust` is required (there's nothing to verify against
 otherwise). Prints `valid` on success; refuses (same errors as `scan run`)
 if the plugin is unsigned, the signature doesn't match, or `name` isn't
-discovered in `--plugins-dir`. There's no `eumeaus plugin sign` command
-yet — computing a manifest's `signature` field means calling
-`eumeaus_plugin_host::sign` programmatically (see
-`eumeaus-plugin-host/src/signature.rs` and any test's
-`write_signed_manifest`/`signed_manifest` helper for the exact pattern);
-wiring that up as a CLI subcommand is a natural next step, not yet done.
+discovered in `--plugins-dir`.
+
+`sign <name> --signing-key-file <path>` signs a discovered plugin's
+manifest (over its name/version/entrypoint-binary-hash — see
+`eumeaus-plugin-host/src/signature.rs`) with a hex-encoded 32-byte
+Ed25519 private key read from `<path>` (this tool never generates or
+stores this key for you — same convention as `case export
+--sign-key-file`), writes the resulting base64 signature into that
+plugin's `plugin.toml` on disk, and prints the signature followed by
+`public key: <hex>` — the public half to `trust add` or hand to
+`scan run --trusted-key`/`plugin verify --trusted-key`. Re-signs the
+same plugin.toml this ran against — signing your own installed copy in
+`--plugins-dir`, not a separate source tree.
+
+```console
+$ eumeaus plugin sign email-lookup --plugins-dir plugins --signing-key-file signing-key.hex
+PAMW7xoAusH6qdIkTmrl1QrIL8fg/QhQ/+wwetc0uqMk+seyo0bhK12VJk43DvZ85fHJg0BuozBBgs+dzWVtCQ==
+public key: ee946d477b4cbf89ad71e8b91a8181bd3354ca0a457715dcce4a16c7cbfc807b
+$ eumeaus plugin list --plugins-dir plugins
+email-lookup	0.1.0	signed	/path/to/plugins/email-lookup/eumeaus-email-lookup-plugin
+$ eumeaus plugin verify email-lookup --plugins-dir plugins \
+    --trusted-key ee946d477b4cbf89ad71e8b91a8181bd3354ca0a457715dcce4a16c7cbfc807b
+valid
+```
 
 ```console
 $ eumeaus plugin verify username-search --plugins-dir plugins --trusted-key 0000000000000000000000000000000000000000000000000000000000000000
@@ -623,9 +639,8 @@ wired:
 | `entity list --filter <expr>` | parsed but ignored; only `--type` actually filters |
 | `plugin list --installed` / `--available` | both no-ops — see the `plugin` section above |
 
-There's also no `eumeaus plugin sign` command (see the `plugin verify`
-section above) and no `case delete`/`case close` CLI command (an open
-case's OS-keychain key has no way to be removed except by hand).
+There's also no `case delete`/`case close` CLI command (an open case's
+OS-keychain key has no way to be removed except by hand).
 
 ## Exit codes
 

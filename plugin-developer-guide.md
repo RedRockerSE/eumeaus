@@ -330,20 +330,30 @@ doesn't invalidate its signature. Signing attests to **what code runs**,
 under what declared name/version — nothing about its current
 configuration.
 
-There's no `eumeaus plugin sign` CLI command yet. Producing a signature
-means calling the signing function programmatically:
+Sign your installed plugin with the CLI directly:
 
-```rust
-let signature_b64 = eumeaus_plugin_host::sign(&signing_key, &manifest)?;
+```console
+$ eumeaus plugin sign my-plugin --plugins-dir plugins --signing-key-file signing-key.hex
+<base64 signature>
+public key: <64 hex chars>
 ```
 
-(`ed25519_dalek::SigningKey`, same key format as everywhere else Ed25519
-is used in this project.) See `eumeaus-plugin-host/src/signature.rs` and
-any test's `write_signed_manifest` helper in this repository for the
-exact working pattern — sign against an unsigned draft manifest, then
-write the final `plugin.toml` with that signature filled in; because the
-entrypoint *path* isn't part of what's signed, a signature computed once
-stays valid even if the binary gets moved.
+`--signing-key-file` points at a file containing a hex-encoded 32-byte
+Ed25519 private key (same format/convention as `case export
+--sign-key-file`) — bring your own key, generated with whatever
+standard Ed25519 tool you already trust; this command never generates
+or stores one for you. It writes the resulting signature straight into
+your plugin's `plugin.toml` on disk and prints the signer's public
+key — hand that to whoever installs your plugin so they can
+`eumeaus trust add <name> <that hex key>` or pass it directly via
+`--trusted-key`. Because the entrypoint *path* isn't part of what's
+signed, a signature computed once stays valid even if the binary gets
+moved afterward.
+
+Doing this programmatically instead (e.g. from your own build/release
+tooling) means calling the same function the CLI command wraps:
+`eumeaus_plugin_host::sign(&signing_key, &manifest)` — see
+`eumeaus-plugin-host/src/signature.rs` for the exact payload it signs.
 
 ## 8. Externalizing configuration (optional, recommended for larger plugins)
 

@@ -222,6 +222,22 @@ enum PluginCmd {
         #[arg(long)]
         trust: Option<String>,
     },
+    /// Not in SPEC.md §3.4's illustrative surface — the `plugin
+    /// verify`/`scan run --trusted-key` sections previously noted this
+    /// didn't exist yet; `eumeaus_plugin_host::sign`/`signature.rs` were
+    /// already written for exactly this. Prints the signature and the
+    /// signer's public key (hex) — the latter is what to `trust add` or
+    /// hand to `scan run --trusted-key`/`plugin verify --trusted-key`.
+    Sign {
+        name: String,
+        #[arg(long = "plugins-dir", default_value = "plugins")]
+        plugins_dir: PathBuf,
+        /// Path to a file containing a hex-encoded 32-byte Ed25519 private
+        /// key — same format/convention as `case export --sign-key-file`.
+        /// This tool never generates or stores this key for you.
+        #[arg(long = "signing-key-file")]
+        signing_key_file: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -623,6 +639,22 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 let trust_policy = parse_trust_policy(trusted_key.as_deref(), trust.as_deref())?;
                 eumeaus_engine::plugins::verify(&manifest, &trust_policy)?;
                 println!("valid");
+                Ok(())
+            }
+            PluginCmd::Sign {
+                name,
+                plugins_dir,
+                signing_key_file,
+            } => {
+                let manifest = eumeaus_engine::plugins::discover(&plugins_dir)?
+                    .into_iter()
+                    .find(|m| m.plugin.name == name)
+                    .ok_or_else(|| CliError::UnknownPlugin(name.clone()))?;
+                let signing_key_hex = std::fs::read_to_string(&signing_key_file)?;
+                let (signature, public_key_hex) =
+                    eumeaus_engine::plugins::sign(&manifest, &signing_key_hex)?;
+                println!("{signature}");
+                println!("public key: {public_key_hex}");
                 Ok(())
             }
         },
