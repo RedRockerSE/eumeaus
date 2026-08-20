@@ -171,12 +171,31 @@ function CaseScreen({
 // G2 (SPEC.md §9.6): entity/fact browsing, read-only — wraps entity_list/
 // entity_show (entity_state.rs), the same Case::list_entities/get_entity/
 // list_attribute_records calls eumeaus-cli's `entity list`/`entity show`
-// make. Write path (add/merge/split) starts at G4.
+// make.
+//
+// G4: the write path — entity_add/entity_merge/entity_split/
+// relationship_add. Every write refreshes the list afterwards rather than
+// trying to patch state locally, since a merge/split can change which
+// entities exist at all.
 function EntityScreen() {
   const [entities, setEntities] = useState<EntitySummary[] | null>(null);
   const [selected, setSelected] = useState<EntityDetail | null>(null);
   const [typeFilter, setTypeFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  const [newType, setNewType] = useState("Person");
+  const [newKey, setNewKey] = useState("");
+  const [newAttrKey, setNewAttrKey] = useState("");
+  const [newAttrValue, setNewAttrValue] = useState("");
+
+  const [mergeId1, setMergeId1] = useState("");
+  const [mergeId2, setMergeId2] = useState("");
+
+  const [splitFactIds, setSplitFactIds] = useState<Set<string>>(new Set());
+
+  const [relFrom, setRelFrom] = useState("");
+  const [relTo, setRelTo] = useState("");
+  const [relType, setRelType] = useState("AssociatedWith");
 
   async function refresh(e?: React.FormEvent) {
     e?.preventDefault();
@@ -199,11 +218,89 @@ function EntityScreen() {
 
   async function show(id: string) {
     setError(null);
+    setSplitFactIds(new Set());
     try {
       setSelected(await invoke<EntityDetail>("entity_show", { id }));
     } catch (e) {
       setError(String(e));
     }
+  }
+
+  async function addEntity(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const attrs = newAttrKey.trim()
+        ? [{ key: newAttrKey, value: newAttrValue }]
+        : [];
+      await invoke("entity_add", {
+        entityType: newType,
+        key: newKey || null,
+        attrs,
+      });
+      setNewKey("");
+      setNewAttrKey("");
+      setNewAttrValue("");
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function mergeEntities(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await invoke("entity_merge", { id1: mergeId1, id2: mergeId2 });
+      setMergeId1("");
+      setMergeId2("");
+      setSelected(null);
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function splitEntity() {
+    if (!selected || splitFactIds.size === 0) return;
+    setError(null);
+    try {
+      await invoke("entity_split", {
+        id: selected.id,
+        factIds: Array.from(splitFactIds),
+      });
+      setSelected(null);
+      setSplitFactIds(new Set());
+      await refresh();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function addRelationship(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await invoke("relationship_add", {
+        from: relFrom,
+        to: relTo,
+        relType,
+        attrs: [],
+      });
+      setRelFrom("");
+      setRelTo("");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function toggleSplitFact(factId: string) {
+    setSplitFactIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(factId)) next.delete(factId);
+      else next.add(factId);
+      return next;
+    });
   }
 
   return (
@@ -218,6 +315,66 @@ function EntityScreen() {
           onChange={(e) => setTypeFilter(e.currentTarget.value)}
         />
         <button type="submit">Refresh</button>
+      </form>
+
+      <form onSubmit={addEntity}>
+        <h3>Add entity</h3>
+        <input
+          placeholder="Type"
+          value={newType}
+          onChange={(e) => setNewType(e.currentTarget.value)}
+        />
+        <input
+          placeholder="Canonical key (optional)"
+          value={newKey}
+          onChange={(e) => setNewKey(e.currentTarget.value)}
+        />
+        <input
+          placeholder="Attribute key (optional)"
+          value={newAttrKey}
+          onChange={(e) => setNewAttrKey(e.currentTarget.value)}
+        />
+        <input
+          placeholder="Attribute value"
+          value={newAttrValue}
+          onChange={(e) => setNewAttrValue(e.currentTarget.value)}
+        />
+        <button type="submit">Add</button>
+      </form>
+
+      <form onSubmit={mergeEntities}>
+        <h3>Merge</h3>
+        <input
+          placeholder="Entity id 1 (survivor)"
+          value={mergeId1}
+          onChange={(e) => setMergeId1(e.currentTarget.value)}
+        />
+        <input
+          placeholder="Entity id 2"
+          value={mergeId2}
+          onChange={(e) => setMergeId2(e.currentTarget.value)}
+        />
+        <button type="submit">Merge</button>
+      </form>
+
+      <form onSubmit={addRelationship}>
+        <h3>Add relationship</h3>
+        <input
+          placeholder="From entity id"
+          value={relFrom}
+          onChange={(e) => setRelFrom(e.currentTarget.value)}
+        />
+        <input
+          placeholder="To entity id"
+          value={relTo}
+          onChange={(e) => setRelTo(e.currentTarget.value)}
+        />
+        <input
+          placeholder="Relationship type"
+          value={relType}
+          onChange={(e) => setRelType(e.currentTarget.value)}
+        />
+        <button type="submit">Add relationship</button>
       </form>
 
       {entities && entities.length === 0 && <p>(no entities)</p>}
@@ -243,18 +400,28 @@ function EntityScreen() {
             <br />
             canonical_key: {selected.canonical_key ?? "-"}
           </p>
-          <h4>Attributes</h4>
+          <h4>Attributes (check to split into a new entity)</h4>
           {selected.attributes.length === 0 && <p>(none)</p>}
           {selected.attributes.length > 0 && (
             <ul>
               {selected.attributes.map((a) => (
                 <li key={a.fact_id}>
-                  {a.is_current ? "*" : " "} {a.key} = {a.value} (fact:{" "}
-                  {a.fact_id}, source: {a.source})
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={splitFactIds.has(a.fact_id)}
+                      onChange={() => toggleSplitFact(a.fact_id)}
+                    />
+                    {a.is_current ? "*" : " "} {a.key} = {a.value} (fact:{" "}
+                    {a.fact_id}, source: {a.source})
+                  </label>
                 </li>
               ))}
             </ul>
           )}
+          <button onClick={splitEntity} disabled={splitFactIds.size === 0}>
+            Split checked facts into a new entity
+          </button>
         </div>
       )}
     </section>
@@ -417,7 +584,7 @@ function App() {
   return (
     <main className="container">
       <h1>Eumeaus</h1>
-      <p>GUI scaffold (SPEC.md §9, milestone G3)</p>
+      <p>GUI scaffold (SPEC.md §9, milestone G4)</p>
       <CaseScreen current={currentCase} onChange={setCurrentCase} />
       {currentCase && <EntityScreen />}
       {currentCase && <ScanScreen />}

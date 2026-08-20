@@ -105,11 +105,12 @@ release, which caught a real checksum-file newline bug (see
 `release.yml`'s Windows packaging step comment).
 
 GUI (SPEC.md §9, `feat/gui-tauri` branch): design resolved (Tauri 2.x,
-React+TS, Linux+Windows only, `crates/` workspace). G0–G3 done, verified
-live against the real username-search plugin: case lifecycle (G1),
-read-only entity/fact browsing (G2), scan run with live per-plugin
-progress (G3) — needed one real, additive engine API
-(`Case::resume_scan_with_progress`, SPEC.md §9.2). G4 is next.
+React+TS, Linux+Windows only, `crates/` workspace). G0–G4 done, verified
+live: case lifecycle (G1), entity/fact browsing (G2), scan run with live
+progress against the real username-search plugin (G3, needed one
+additive engine API — `Case::resume_scan_with_progress`, §9.2), entity
+add/merge/split + relationship add (G4, same `audit_events` shape as a
+CLI-initiated merge). G5 is next.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/
@@ -124,9 +125,8 @@ lists `entity_attributes`); `eumeaus-plugin-host`'s async API and
 - `cargo test` needs a running, *unlocked* OS Secret Service (gnome-keyring
   or equivalent) — any test that calls `Case::create`/`open` stores/reads a
   real key there. Works out of the box in a normal desktop session; CI
-  starts one explicitly (see `.github/workflows/ci.yml`). In a headless/SSH
-  shell with no keyring daemon, these tests will hang or fail on
-  `EngineError::Keychain`.
+  starts one explicitly (`.github/workflows/ci.yml`). Headless/SSH with no
+  keyring daemon: these tests hang or fail on `EngineError::Keychain`.
 - No system `protoc` is assumed to be installed; `eumeaus-plugin-protocol`'s
   build.rs points `PROTOC` at the `protoc-bin-vendored` crate's bundled
   binary instead. Don't add a "install protoc" CI step — it's unnecessary

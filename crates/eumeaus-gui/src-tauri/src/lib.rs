@@ -3,7 +3,9 @@ mod entity_state;
 mod scan_state;
 
 use case_state::{case_close, case_create, case_current, case_list, case_open, AppState};
-use entity_state::{entity_list, entity_show};
+use entity_state::{
+    entity_add, entity_list, entity_merge, entity_show, entity_split, relationship_add,
+};
 use scan_state::{scan_list, scan_run};
 
 // G0 (SPEC.md §9.6): a trivial command that genuinely round-trips into
@@ -47,6 +49,10 @@ pub fn run() {
             case_list,
             entity_list,
             entity_show,
+            entity_add,
+            entity_merge,
+            entity_split,
+            relationship_add,
             scan_run,
             scan_list,
         ])
