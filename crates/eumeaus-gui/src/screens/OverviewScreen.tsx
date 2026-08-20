@@ -1,10 +1,142 @@
 import { useEffect, useState } from "react";
 import type { AuditEvent, CaseInfo, CaseStats } from "../api";
-import { auditList, caseStats } from "../api";
+import { auditList, caseExport, caseStats, reportVerify } from "../api";
 
 function fmtTime(ms: number): string {
   const d = new Date(ms);
   return d.toISOString().slice(0, 16).replace("T", " ");
+}
+
+type ExportFormat = "sqlite" | "report" | "html" | "portable";
+
+// Report export + signature verify (SPEC.md §9.3) — the one screen the
+// dogfooding pass found missing from both G0–G6 and the design handover.
+// Lives on Overview rather than its own sidebar item: it's a one-off
+// action on the whole case, not a browsable surface like Entities/Scans.
+function ExportCard({ current }: { current: CaseInfo }) {
+  const [format, setFormat] = useState<ExportFormat>("report");
+  const [out, setOut] = useState("");
+  const [passphrase, setPassphrase] = useState("");
+  const [signKeyHex, setSignKeyHex] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function doExport(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setResult(null);
+    try {
+      const publicKey = await caseExport(
+        out,
+        format,
+        format === "portable" ? passphrase : null,
+        signKeyHex || null,
+      );
+      setResult(
+        publicKey
+          ? `Exported to ${out}, signed. Public key: ${publicKey}`
+          : `Exported to ${out}.`,
+      );
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="field-label" style={{ marginBottom: 11 }}>
+        Export case ({current.name})
+      </div>
+      <form className="col" onSubmit={doExport}>
+        <div className="row">
+          <select style={{ width: 130 }} value={format} onChange={(e) => setFormat(e.currentTarget.value as ExportFormat)}>
+            <option value="report">Report (JSON)</option>
+            <option value="html">Report (HTML)</option>
+            <option value="sqlite">Plaintext SQLite</option>
+            <option value="portable">Portable (re-keyed)</option>
+          </select>
+          <input
+            className="mono"
+            style={{ flex: 1 }}
+            value={out}
+            onChange={(e) => setOut(e.currentTarget.value)}
+            placeholder="Output path"
+          />
+        </div>
+        {format === "portable" && (
+          <input
+            type="password"
+            value={passphrase}
+            onChange={(e) => setPassphrase(e.currentTarget.value)}
+            placeholder="Passphrase to protect this export"
+          />
+        )}
+        <input
+          className="mono"
+          value={signKeyHex}
+          onChange={(e) => setSignKeyHex(e.currentTarget.value)}
+          placeholder="Sign with key (hex, optional — for report/html tamper-evidence)"
+        />
+        <button type="submit" className="btn btn-primary" style={{ alignSelf: "flex-start" }}>
+          Export
+        </button>
+      </form>
+      {error && <p className="error-text">{error}</p>}
+      {result && <p style={{ color: "var(--ok)", fontSize: 12 }}>{result}</p>}
+    </div>
+  );
+}
+
+function VerifyCard() {
+  const [reportPath, setReportPath] = useState("");
+  const [sigPath, setSigPath] = useState("");
+  const [trust, setTrust] = useState("");
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function doVerify(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setResult(null);
+    try {
+      await reportVerify(reportPath, sigPath, null, trust || null);
+      setResult("valid");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="field-label" style={{ marginBottom: 11 }}>
+        Verify a report
+      </div>
+      <form className="col" onSubmit={doVerify}>
+        <input
+          className="mono"
+          value={reportPath}
+          onChange={(e) => setReportPath(e.currentTarget.value)}
+          placeholder="Report path"
+        />
+        <input
+          className="mono"
+          value={sigPath}
+          onChange={(e) => setSigPath(e.currentTarget.value)}
+          placeholder="Signature path (.sig)"
+        />
+        <input
+          value={trust}
+          onChange={(e) => setTrust(e.currentTarget.value)}
+          placeholder="Trust store name"
+        />
+        <button type="submit" className="btn" style={{ alignSelf: "flex-start" }}>
+          Verify
+        </button>
+      </form>
+      {error && <p className="error-text">{error}</p>}
+      {result && <p style={{ color: "var(--ok)", fontSize: 12 }}>{result}</p>}
+    </div>
+  );
 }
 
 export default function OverviewScreen({ current }: { current: CaseInfo }) {
@@ -94,6 +226,8 @@ export default function OverviewScreen({ current }: { current: CaseInfo }) {
               ))}
             </div>
           </div>
+          <ExportCard current={current} />
+          <VerifyCard />
         </div>
       </div>
     </div>

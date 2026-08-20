@@ -3,6 +3,7 @@ mod credential_state;
 mod entity_state;
 mod overview_state;
 mod plugin_state;
+mod report_state;
 mod scan_state;
 mod trust_state;
 
@@ -14,6 +15,7 @@ use entity_state::{
 };
 use overview_state::{audit_list, case_stats};
 use plugin_state::{plugin_install, plugin_list, plugin_verify};
+use report_state::{case_export, report_verify};
 use scan_state::{scan_list, scan_run};
 use trust_state::{trust_add, trust_list, trust_remove};
 
@@ -79,6 +81,8 @@ pub fn run() {
             relationship_list,
             case_stats,
             audit_list,
+            case_export,
+            report_verify,
             scan_run,
             scan_list,
             plugin_list,

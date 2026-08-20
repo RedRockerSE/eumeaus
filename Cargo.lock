@@ -1418,6 +1418,7 @@ dependencies = [
  "dirs 5.0.1",
  "ed25519-dalek",
  "eumeaus-engine",
+ "rand 0.8.7",
  "serde",
  "serde_json",
  "tauri",

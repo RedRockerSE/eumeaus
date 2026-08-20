@@ -161,6 +161,21 @@ export const trustAdd = (name: string, publicKey: string) =>
 export const trustList = () => invoke<TrustedKey[]>("trust_list");
 export const trustRemove = (name: string) => invoke<void>("trust_remove", { name });
 
+// ---- report_state.rs ----
+
+export const caseExport = (
+  out: string,
+  format: "sqlite" | "report" | "html" | "portable",
+  passphrase: string | null,
+  signKeyHex: string | null,
+) => invoke<string | null>("case_export", { out, format, passphrase, signKeyHex });
+export const reportVerify = (
+  reportPath: string,
+  sigPath: string,
+  trustedKey: string | null,
+  trust: string | null,
+) => invoke<void>("report_verify", { reportPath, sigPath, trustedKey, trust });
+
 // ---- misc ----
 
 export const listEntityTypes = () => invoke<string[]>("list_entity_types");
