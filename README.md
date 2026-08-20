@@ -35,8 +35,9 @@ irm https://raw.githubusercontent.com/RedRockerSE/eumeaus/main/install.ps1 | iex
 ```
 
 Both scripts verify a SHA-256 checksum against the release before
-installing, and also install the bundled `username-search` and
-`email-lookup` plugins ready to use with `scan run --plugins-dir`. See
+installing, and also install the bundled `username-search`,
+`email-lookup`, and `ip-lookup` plugins ready to use with
+`scan run --plugins-dir`. See
 [`install.sh`](./install.sh)/[`install.ps1`](./install.ps1) for exactly
 what they do — nothing hidden, no piping to a shell you haven't read.
 
@@ -54,6 +55,8 @@ release workflow ships.
   plugin: a small Sherlock-equivalent username checker.
 - `crates/eumeaus-email-lookup-plugin` — a second real plugin: checks
   whether an email address has a registered Gravatar/Libravatar avatar.
+- `crates/eumeaus-ip-lookup-plugin` — a third real plugin: geolocates an
+  IP address (city/region/country, ISP/org) via ip-api.com.
 - `crates/eumeaus-cli` — the v1 user-facing CLI, and the end-to-end test surface.
 
 ## Commands

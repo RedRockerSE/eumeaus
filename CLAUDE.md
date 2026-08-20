@@ -34,6 +34,8 @@ before merge.
 - `crates/eumeaus-email-lookup-plugin` — a second real plugin, same
   shipped-`[[bin]]` treatment: checks Gravatar/Libravatar for a
   registered avatar (MD5-of-email lookup, no API key).
+- `crates/eumeaus-ip-lookup-plugin` — a third real plugin: geolocates an
+  `IPAddress` via ip-api.com, emitting `Location`+`Organization`.
 - `crates/eumeaus-cli` — thin CLI wrapper over the engine API; also the
   end-to-end test surface (`crates/eumeaus-cli/tests/`), including the v1
   proof (`e2e_v1_proof.rs`, SPEC.md §6).
@@ -97,29 +99,27 @@ before merge.
 
 SPEC.md §7's milestones (M0–M6) are done — v1 CLI complete, released,
 public (`CLI.md` is the full reference); §8.1–8.7 resolved, §8.8 has a
-design (§9). v0.1.0 is tagged/published via `.github/workflows/
-release.yml` (tag push → archives + checksums → draft Release, bundling
-both plugins below); `install.sh`/`install.ps1` fetch/verify from there.
+design (§9). `v0.1.0`/`v0.1.1` tagged/published via `.github/workflows/
+release.yml` (bundles all three plugins below); `install.sh`/`install.ps1` fetch/verify from there.
 
 GUI (SPEC.md §9): Tauri 2.x, React+TS, Linux+Windows only, `crates/`
 workspace. G0–G6 done; `gui-v0.1.0`/`gui-v0.1.1` tagged/published
 (unsigned — Windows Authenticode deferred). Updater verified live
-end-to-end on `gui-v0.1.1`: a running v0.1.0 instance detected,
-downloaded, verified, installed, relaunched into it. UX redesign
-(claude.ai/design handover, merged) replaced G0–G6's flat forms: custom
-titlebar, sidebar screens (Overview/Entities/Graph/Scans/Plugins/
-Settings), all real backend commands, no mock data — see `api.ts`/
-`entityStyle.ts`. Graph: real circular layout (no force-directed dep).
-Launcher's "recent cases": real directory browser, no backend MRU
-tracking. Report export + verify (`report_state.rs`) lives on Overview.
+end-to-end: a running v0.1.0 instance detected, downloaded, verified,
+installed, relaunched into `gui-v0.1.1`. UX redesign (claude.ai/design
+handover, merged) replaced G0–G6's flat forms: custom titlebar, sidebar
+screens (Overview/Entities/Graph/Scans/Plugins/Settings), all real
+backend commands, no mock data — see `api.ts`/`entityStyle.ts`. Graph:
+real circular layout. Launcher's "recent cases": real directory
+browser. Report export + verify (`report_state.rs`) on Overview.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/`find_entity_by_key`/
 `create_scan` (§3.1 gives no signatures); `RelationshipType::Custom` +
 `relationship_attributes` table (§4.2 only lists `entity_attributes`);
 `eumeaus-plugin-host`'s async API, `Case::start_scan`'s
-`Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions), and
-the plugin signature scheme (§3.3 has none).
+`Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions); the
+plugin signature scheme (§3.3 has none).
 
 ## Gotchas
 

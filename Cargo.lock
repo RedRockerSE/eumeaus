@@ -1450,6 +1450,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "eumeaus-ip-lookup-plugin"
+version = "0.1.1"
+dependencies = [
+ "async-trait",
+ "eumeaus-plugin-protocol",
+ "eumeaus-plugin-sdk",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
 name = "eumeaus-plugin-host"
 version = "0.1.1"
 dependencies = [

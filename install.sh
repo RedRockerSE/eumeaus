@@ -84,10 +84,17 @@ cp "$extracted/plugins/email-lookup/eumeaus-email-lookup-plugin" "$email_plugin_
 cp "$extracted/plugins/email-lookup/plugin.toml" "$email_plugin_dir/"
 chmod +x "$email_plugin_dir/eumeaus-email-lookup-plugin"
 
+ip_plugin_dir="$install_dir/eumeaus-plugins/ip-lookup"
+mkdir -p "$ip_plugin_dir"
+cp "$extracted/plugins/ip-lookup/eumeaus-ip-lookup-plugin" "$ip_plugin_dir/"
+cp "$extracted/plugins/ip-lookup/plugin.toml" "$ip_plugin_dir/"
+chmod +x "$ip_plugin_dir/eumeaus-ip-lookup-plugin"
+
 echo
 echo "Installed eumeaus ${version} to $install_dir/eumeaus"
 echo "Installed the bundled username-search plugin to $plugin_dir"
 echo "Installed the bundled email-lookup plugin to $email_plugin_dir"
+echo "Installed the bundled ip-lookup plugin to $ip_plugin_dir"
 
 case ":$PATH:" in
     *":$install_dir:"*) ;;

@@ -423,6 +423,14 @@ piece of this guide:
 Read it top to bottom before writing your own plugin from scratch —
 almost everything you need is one working example away.
 
+Two more real, shipped plugins are worth reading for patterns
+`username-search` doesn't cover: `crates/eumeaus-email-lookup-plugin/`
+(a second free-provider config pattern, no credentials) and
+`crates/eumeaus-ip-lookup-plugin/` (a single HTTP call that emits
+*multiple* entity types — `Location` and `Organization` — and multiple
+relationship types from one response, rather than one entity per
+site/provider checked).
+
 ## 11. Where to look for more
 
 - [`SPEC.md`](./SPEC.md) §2.2–2.4, §3.2–3.3 — full architectural

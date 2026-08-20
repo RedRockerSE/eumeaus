@@ -7,6 +7,7 @@ members = [
     "crates/eumeaus-plugin-sdk",
     "crates/eumeaus-username-search-plugin",
     "crates/eumeaus-email-lookup-plugin",
+    "crates/eumeaus-ip-lookup-plugin",
     "crates/eumeaus-cli",
     "crates/eumeaus-gui/src-tauri",
 ]
