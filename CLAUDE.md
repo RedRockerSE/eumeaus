@@ -106,9 +106,10 @@ release, which caught a real checksum-file newline bug (see
 `release.yml`'s Windows packaging step comment).
 
 GUI (SPEC.md §9, `feat/gui-tauri` branch): design resolved (Tauri 2.x,
-React+TS, Linux+Windows only, `crates/` workspace). G0 (scaffold) and G1
-(case create/open/close, real keychain + SQLCipher, `case_state.rs`) both
-done and verified live via `tauri dev`. G2 (entity/fact browsing) is next.
+React+TS, Linux+Windows only, `crates/` workspace). G0–G2 done and
+verified live via `tauri dev`: case create/open/close (`case_state.rs`,
+G1), read-only entity/fact browsing (`entity_state.rs`, G2). G3 (scan
+run + live progress) is next.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/

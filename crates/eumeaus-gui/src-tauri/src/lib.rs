@@ -1,6 +1,8 @@
 mod case_state;
+mod entity_state;
 
 use case_state::{case_close, case_create, case_current, case_list, case_open, AppState};
+use entity_state::{entity_list, entity_show};
 
 // G0 (SPEC.md §9.6): a trivial command that genuinely round-trips into
 // eumeaus-engine, proving the workspace dependency links correctly — not
@@ -41,6 +43,8 @@ pub fn run() {
             case_close,
             case_current,
             case_list,
+            entity_list,
+            entity_show,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
