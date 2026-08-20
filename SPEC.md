@@ -378,9 +378,11 @@ State: `Case` owns a `rusqlite::Connection`, which is `!Sync` (`eumeaus-engine/s
 
 ### 9.3 Screens (full eventual surface, not all in one milestone — see §9.6)
 
+The actual visual/interaction design for these screens was handed over from Claude Design (claude.ai/design) after G0–G6 shipped functionally-plain versions, and implemented on `feat/gui-ux-design`: a dark, information-dense desktop shell with a custom titlebar (`decorations: false`) and sidebar navigation across Overview/Entities/Graph/Scans/Plugins/Settings. Every screen below wires to real backend commands — the design handover's own preview necessarily used fixture data, none of which survived translation into the app (`crates/eumeaus-gui/src/api.ts` is the full real command surface). Two adaptations where the design assumed something the backend doesn't have: Graph uses a real circular layout (the design's hand-placed node coordinates don't exist for arbitrary case data, and a force-directed-layout dependency isn't in this project); the launcher's "recent cases" is a real directory browser (`case_list`) rather than invented history, since no MRU-case-tracking exists in the backend.
+
 - Case list / create / open / close (`case list/create/open/export`)
 - Entity list and detail (facts, attributes, relationships) (`entity show`, `fact`)
-- Relationship view (table first; graph visualization is a stretch goal, not a G-milestone commitment)
+- Relationship view — implemented as a real graph visualization (circular layout, see above), not just the table originally planned as the first cut
 - Scan run/monitor/resume, live-updating via §9.2's event stream (`scan run/list/resume`)
 - Plugin management: list/install/verify/trust (`plugin`, `trust`)
 - Credential management (`credential set/list/remove`) — GUI's own analog of CLI's `rpassword` TTY prompt is a normal password `<input>`, not a gotcha here the way it was for CLI headless testing

@@ -92,26 +92,26 @@ before merge.
 
 ## Current status
 
-All of SPEC.md §7's milestones (M0–M6) are done — the v1 CLI is complete,
-released, and public (`CLI.md` is the full command reference). SPEC.md
-§8.1–8.7 resolved; §8.8 (update mechanism) now has a design (§9).
-
-v0.1.0 is tagged and published (public repo) via
-`.github/workflows/release.yml` (tag push → Linux musl + Windows msvc
-archives + checksums → draft GitHub Release); `install.sh`/`install.ps1`
-fetch and verify from there — both tested end-to-end, which caught a
-real checksum-file newline bug (`release.yml`'s Windows packaging step).
+SPEC.md §7's milestones (M0–M6) are done — v1 CLI complete, released,
+public (`CLI.md` is the full reference); §8.1–8.7 resolved, §8.8 has a
+design (§9). v0.1.0 is tagged/published via `.github/workflows/
+release.yml` (tag push → Linux musl + Windows msvc archives + checksums
+→ draft Release); `install.sh`/`install.ps1` fetch/verify from there —
+both tested end-to-end (a real checksum-newline bug was caught this way;
+see the Windows packaging step's comment).
 
 GUI (SPEC.md §9, `feat/gui-tauri` branch): design resolved (Tauri 2.x,
-React+TS, Linux+Windows only, `crates/` workspace). G0–G5 done and
-verified live. G6 (`release-gui.yml`, `gui-v*` tags) mostly done:
-updater/process plugins wired in and live-verified reaching their
-endpoint; a real signing keypair is generated (public half committed in
-`tauri.conf.json`, private half still needs adding as the
-`TAURI_SIGNING_PRIVATE_KEY` GitHub secret). Windows Authenticode signing
-deliberately deferred (real cert/cost, outside what could be done here)
-— ships unsigned. Still needed: that secret, then a real `gui-v0.1.0`/
-`gui-v0.1.1` pair to test an actual applied update.
+React+TS, Linux+Windows only, `crates/` workspace). G0–G6 all done and
+live-verified; `gui-v0.1.0` tagged and published (unsigned — Windows
+Authenticode needs a real certificate, deliberately deferred).
+
+UX redesign (`feat/gui-ux-design`, claude.ai/design handover) replaced
+G0–G6's flat unstyled forms: custom titlebar (`decorations: false`),
+sidebar screens (Overview/Entities/Graph/Scans/Plugins/Settings), all
+real backend commands, no mock data — see `api.ts`/`entityStyle.ts`.
+Graph uses a real circular layout (no force-directed dep exists here);
+Launcher's "recent cases" is a real directory browser (`case_list`),
+since no MRU tracking exists in the backend.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/
