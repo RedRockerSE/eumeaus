@@ -164,18 +164,19 @@ milestone, not a projection:
   disk, subprocess argv, or environment variables in plaintext),
   Ed25519 plugin signing and a local trust store, append-only fact
   history with a hard audit trail for merges/splits.
+- **A second real plugin shipped** — email lookup (Gravatar/Libravatar
+  avatar checks), live-verified against production servers, proving the
+  plugin model generalizes beyond username enumeration on the first try.
 
 ## Roadmap
 
-1. **Second plugin, in progress** — email lookup, to prove the plugin
-   model generalizes beyond username enumeration.
-2. **Third-party plugin ecosystem** — publish the developer guide,
+1. **Third-party plugin ecosystem** — publish the developer guide,
    recruit early plugin authors, stand up a signed-plugin catalog.
-3. **Windows code signing** — remove the SmartScreen warning path for
+2. **Windows code signing** — remove the SmartScreen warning path for
    enterprise buyers who require signed installers.
-4. **macOS support** — currently deferred, revisit once there's
+3. **macOS support** — currently deferred, revisit once there's
    committed buyer demand.
-5. **Enterprise/compliance packages** — jurisdiction-specific
+4. **Enterprise/compliance packages** — jurisdiction-specific
    evidentiary export tooling, sold alongside the open-core product.
 
 ## The ask
