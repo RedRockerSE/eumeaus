@@ -32,10 +32,26 @@ pub struct PluginSection {
     pub description: String,
     #[serde(default)]
     pub author: String,
-    /// Base64 detached signature. `None` (the field absent from the TOML)
-    /// means unsigned — refused to load unless [`crate::TrustPolicy::AllowUnsigned`].
-    #[serde(default)]
+    /// Base64 detached signature. `None` — whether the field is absent
+    /// from the TOML, or present but empty (`signature = ""`, the
+    /// convention this project's own shipped reference manifests use as a
+    /// visible "not signed yet" placeholder, e.g.
+    /// `eumeaus-username-search-plugin/plugin.toml`) — means unsigned,
+    /// refused to load unless [`crate::TrustPolicy::AllowUnsigned`]. A
+    /// real signature is never empty, so normalizing both spellings of
+    /// "nothing here" to `None` keeps every caller (the `signed`/
+    /// `unsigned` label in `plugin list`, [`crate::signature::verify`])
+    /// from having to know about the empty-string convention itself.
+    #[serde(default, deserialize_with = "empty_string_as_none")]
     pub signature: Option<String>,
+}
+
+fn empty_string_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<String> = Option::deserialize(deserializer)?;
+    Ok(value.filter(|s| !s.is_empty()))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -186,4 +202,53 @@ fn engine_satisfies_max(current: &semver::Version, max: &str) -> bool {
     semver::Version::parse(max)
         .map(|max| current <= &max)
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn manifest_toml(signature_line: &str) -> String {
+        format!(
+            r#"
+[plugin]
+name = "test-plugin"
+version = "0.1.0"
+{signature_line}
+
+[compatibility]
+engine_min = "0.1.0"
+engine_max = "0.x"
+protocol_version = "1"
+
+[execution]
+entrypoint = "./bin"
+default_rate_limit_per_sec = 5
+default_timeout_ms = 8000
+"#
+        )
+    }
+
+    #[test]
+    fn a_signature_field_absent_entirely_parses_as_unsigned() {
+        let manifest: PluginManifest = toml::from_str(&manifest_toml("")).unwrap();
+        assert_eq!(manifest.plugin.signature, None);
+    }
+
+    #[test]
+    fn an_empty_signature_string_also_parses_as_unsigned() {
+        // The convention this project's own shipped reference manifests
+        // use as a visible "not signed yet" placeholder (see
+        // eumeaus-username-search-plugin/plugin.toml) — must behave
+        // identically to the field being absent, not report as signed.
+        let manifest: PluginManifest = toml::from_str(&manifest_toml(r#"signature = """#)).unwrap();
+        assert_eq!(manifest.plugin.signature, None);
+    }
+
+    #[test]
+    fn a_real_signature_string_is_preserved() {
+        let manifest: PluginManifest =
+            toml::from_str(&manifest_toml(r#"signature = "abc123""#)).unwrap();
+        assert_eq!(manifest.plugin.signature, Some("abc123".to_string()));
+    }
 }
