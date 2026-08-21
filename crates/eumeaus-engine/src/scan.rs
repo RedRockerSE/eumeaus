@@ -511,10 +511,15 @@ fn build_check_request(
     CheckRequest {
         scan_id: scan_id.to_string(),
         input_entity_type: target_entity.entity_type.to_string(),
-        input_value: target_entity
-            .canonical_key
-            .clone()
-            .unwrap_or_else(|| target_entity.display_label.clone()),
+        // display_label, not canonical_key: canonical_key is deliberately
+        // normalized (trimmed + lowercased, see normalize_key()) so that
+        // auto-merge matching is case-insensitive — but that normalized
+        // form is the wrong thing to actually query a plugin's real
+        // external API with. display_label preserves the original casing
+        // the value was entered/found with, which is what a case-sensitive
+        // identifier (e.g. a base58check Bitcoin address) needs to remain
+        // valid. display_label is never empty, so no fallback is needed.
+        input_value: target_entity.display_label.clone(),
         resolved_credentials,
         rate_limit: Some(RateLimitConfig {
             requests_per_sec: manifest.execution.default_rate_limit_per_sec,
@@ -1480,5 +1485,50 @@ default_timeout_ms = {default_timeout_ms}
         assert_eq!(run_status(case.conn_mut(), scan_id.0, "scan-ok"), "SUCCESS");
 
         keystore::delete_key(case.id()).ok();
+    }
+
+    /// canonical_key is deliberately normalized (trimmed + lowercased) for
+    /// case-insensitive auto-merge matching, but that normalized form is
+    /// the wrong thing to hand a plugin as the real value to query an
+    /// external API with — a case-sensitive identifier like a base58check
+    /// Bitcoin address would silently become a different, invalid address.
+    /// display_label preserves the original casing, so it — not
+    /// canonical_key — must be what ends up in CheckRequest.input_value.
+    #[test]
+    fn check_request_input_value_preserves_original_casing() {
+        let manifest = PluginManifest {
+            plugin: eumeaus_plugin_host::PluginSection {
+                name: "case-sensitive-test".to_string(),
+                version: "0.1.0".to_string(),
+                description: String::new(),
+                author: String::new(),
+                signature: None,
+            },
+            compatibility: eumeaus_plugin_host::CompatibilitySection {
+                engine_min: "0.1.0".to_string(),
+                engine_max: "0.x".to_string(),
+                protocol_version: "1".to_string(),
+            },
+            contract: Default::default(),
+            permissions: Default::default(),
+            execution: eumeaus_plugin_host::ExecutionSection {
+                entrypoint: PathBuf::from("./does-not-matter"),
+                default_rate_limit_per_sec: 5,
+                default_timeout_ms: 8000,
+            },
+            manifest_dir: PathBuf::from("."),
+        };
+
+        let target_entity = Entity {
+            id: EntityId(Uuid::new_v4()),
+            entity_type: EntityType::CryptoWallet,
+            canonical_key: Some("1a1zp1ep5qgefi2dmptftl5slmv7divfna".to_string()),
+            display_label: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa".to_string(),
+        };
+
+        let request =
+            build_check_request(Uuid::new_v4(), &target_entity, &manifest, HashMap::new());
+
+        assert_eq!(request.input_value, "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa");
     }
 }

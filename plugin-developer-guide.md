@@ -431,6 +431,28 @@ Two more real, shipped plugins are worth reading for patterns
 relationship types from one response, rather than one entity per
 site/provider checked).
 
+A fourth, `crates/eumeaus-crypto-wallet-plugin/`, is worth reading for a
+pattern none of the others cover: *self-enrichment*. Its
+`output_entity_types` is just `["CryptoWallet"]` — the same type it takes
+as input — because a wallet's balance and transaction count are facts
+*about the target itself*, not evidence of some other, related thing. Its
+`EntityFinding.canonical_key` is set to the same address that was scanned,
+so the engine's normal exact-`(entity_type, canonical_key)` auto-merge
+(SPEC.md §4.4) folds the new facts straight onto the existing entity
+instead of creating a duplicate — no special-casing needed on the plugin
+side, no `RelationshipFinding`s emitted at all.
+
+This plugin is also why `CheckRequest.input_value` is populated from the
+target entity's `display_label` rather than its `canonical_key`
+(`eumeaus-engine/src/scan.rs`'s `build_check_request`): `canonical_key` is
+deliberately normalized (trimmed + lowercased) for case-insensitive
+matching, which is fine for matching but would silently corrupt a
+genuinely case-sensitive identifier like a base58check Bitcoin address if
+it were what got sent to the real API. `display_label` preserves the
+original casing the value was entered with. If your plugin's target type
+is case-sensitive, this is why it just works — you don't need to do
+anything differently.
+
 ## 11. Where to look for more
 
 - [`SPEC.md`](./SPEC.md) §2.2–2.4, §3.2–3.3 — full architectural

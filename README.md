@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/RedRockerSE/eumeaus/main/install.ps1 | iex
 
 Both scripts verify a SHA-256 checksum against the release before
 installing, and also install the bundled `username-search`,
-`email-lookup`, and `ip-lookup` plugins ready to use with
+`email-lookup`, `ip-lookup`, and `crypto-wallet` plugins ready to use with
 `scan run --plugins-dir`. See
 [`install.sh`](./install.sh)/[`install.ps1`](./install.ps1) for exactly
 what they do — nothing hidden, no piping to a shell you haven't read.
@@ -57,6 +57,9 @@ release workflow ships.
   whether an email address has a registered Gravatar/Libravatar avatar.
 - `crates/eumeaus-ip-lookup-plugin` — a third real plugin: geolocates an
   IP address (city/region/country, ISP/org) via ip-api.com.
+- `crates/eumeaus-crypto-wallet-plugin` — a real plugin: looks up a
+  Bitcoin address's on-chain balance and transaction count via
+  Blockstream's Esplora API.
 - `crates/eumeaus-cli` — the v1 user-facing CLI, and the end-to-end test surface.
 
 ## Commands

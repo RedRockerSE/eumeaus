@@ -325,14 +325,17 @@ default_timeout_ms = 8000
 
 `eumeaus-username-search-plugin`, this project's real plugin, is built
 right alongside the CLI (`cargo build --workspace` produces
-`target/debug/eumeaus-username-search-plugin`). Two more real plugins are
-built the same way: `eumeaus-email-lookup-plugin` (checks whether an
+`target/debug/eumeaus-username-search-plugin`). Three more real plugins
+are built the same way: `eumeaus-email-lookup-plugin` (checks whether an
 email address has a registered Gravatar/Libravatar avatar —
-`input_entity_types = ["Email"]`) and `eumeaus-ip-lookup-plugin`
+`input_entity_types = ["Email"]`), `eumeaus-ip-lookup-plugin`
 (geolocates an IP address via ip-api.com — `input_entity_types =
-["IPAddress"]`, `output_entity_types = ["Location", "Organization"]`).
-See [`plugin-developer-guide.md`](./plugin-developer-guide.md) if you
-want to write a fourth.
+["IPAddress"]`, `output_entity_types = ["Location", "Organization"]`),
+and `eumeaus-crypto-wallet-plugin` (looks up a Bitcoin address's on-chain
+balance and transaction count via Blockstream's Esplora API —
+`input_entity_types = ["CryptoWallet"]`, self-enriching the same
+entity). See [`plugin-developer-guide.md`](./plugin-developer-guide.md)
+if you want to write another.
 
 **Configuring which sites `username-search` checks.** The site list isn't
 hardcoded — drop a `sites.toml` next to `username-search`'s `plugin.toml`
@@ -621,7 +624,12 @@ type's, is trimmed and lowercased for auto-merge matching (SPEC.md §4.4)
 — so two `CryptoWallet` entities whose addresses differ only by case
 auto-merge into one, and a case-sensitive `Url` path is likewise
 lowercased. Not specific to these two types; just easier to hit with
-data that's genuinely case-sensitive.
+data that's genuinely case-sensitive. This normalization is purely an
+internal matching key, though: a scan sends a plugin the entity's
+original-case `display_label` (what you actually typed) as its input
+value, never the lowercased matching key — needed for
+`eumeaus-crypto-wallet-plugin` to query a real, case-sensitive base58check
+address correctly.
 
 ## Attribute conflicts
 
