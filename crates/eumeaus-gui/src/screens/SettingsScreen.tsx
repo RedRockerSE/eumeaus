@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type { TrustedKey } from "../api";
@@ -228,7 +229,14 @@ function TrustPane() {
 function UpdatesPane() {
   const [status, setStatus] = useState<"idle" | "checking" | "up-to-date" | "available" | "installing" | "error">("idle");
   const [availableVersion, setAvailableVersion] = useState<string | null>(null);
+  const [installedVersion, setInstalledVersion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getVersion()
+      .then(setInstalledVersion)
+      .catch((e) => setError(String(e)));
+  }, []);
 
   async function check() {
     setStatus("checking");
@@ -298,7 +306,7 @@ function UpdatesPane() {
         <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: 9, borderBottom: "1px solid var(--border-row)" }}>
           <span className="muted">Installed version</span>
           <span className="mono" style={{ fontSize: 12 }}>
-            0.1.0
+            {installedVersion ?? "—"}
           </span>
         </div>
       </div>
