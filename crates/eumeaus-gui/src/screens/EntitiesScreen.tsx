@@ -165,6 +165,7 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
       setNewFactKey("");
       setNewFactValue("");
       setAddFactOpen(false);
+      onEntitiesChanged(); // bumps the Overview screen's fact_count
     } catch (e) {
       setError(String(e));
     }
@@ -182,6 +183,7 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
       setCustomRelType("");
       const rels = await relationshipList();
       setRelationships(rels);
+      onEntitiesChanged(); // bumps the Overview screen's relationship_count/fact_count
     } catch (e) {
       setError(String(e));
     }
