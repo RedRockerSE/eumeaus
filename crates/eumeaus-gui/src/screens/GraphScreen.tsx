@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { EntitySummary, RelationshipDto } from "../api";
 import { entityList, relationshipList } from "../api";
 import { ENTITY_TYPES, styleForEntityType } from "../entityStyle";
@@ -6,12 +6,22 @@ import { ENTITY_TYPES, styleForEntityType } from "../entityStyle";
 const ACCENT = "#8b7ce8";
 const W = 900;
 const H = 560;
+// Below this many SVG user units of pointer movement, a press+release on
+// a node is treated as a click (select/focus) rather than a drag — lets
+// the existing "click a node to focus it" behavior keep working without
+// a real physical-mouse-didn't-move check being defeated by sub-pixel
+// jitter.
+const DRAG_THRESHOLD = 4;
 
 // The design's mock data came with hand-placed node coordinates; real
-// case data has no such layout. A circular layout is simple, stable
-// (same case always renders the same way), and good enough for the
-// entity counts this tool is meant for — a force-directed layout would
-// need a physics simulation dependency this project doesn't have yet.
+// case data has no such layout, so a circular layout is the starting
+// point — simple, stable (same case always starts out the same way),
+// and good enough for the entity counts this tool is meant for without
+// a physics-simulation dependency this project doesn't have. Nodes are
+// then draggable (see `positions` state below) to reposition from there;
+// this proof of concept keeps dragged positions in memory only — they
+// reset the next time the Graph screen mounts. Persisting them is a
+// separate, later step.
 function circleLayout(ids: string[]): Map<string, { x: number; y: number }> {
   const cx = W / 2;
   const cy = H / 2;
@@ -24,6 +34,8 @@ function circleLayout(ids: string[]): Map<string, { x: number; y: number }> {
   return pos;
 }
 
+type Point = { x: number; y: number };
+
 export default function GraphScreen() {
   const [entities, setEntities] = useState<EntitySummary[] | null>(null);
   const [relationships, setRelationships] = useState<RelationshipDto[] | null>(null);
@@ -31,6 +43,13 @@ export default function GraphScreen() {
   const [typeFilter, setTypeFilter] = useState("All");
   const [focusId, setFocusId] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
+
+  const [positions, setPositions] = useState<Map<string, Point>>(new Map());
+  const svgRef = useRef<SVGSVGElement>(null);
+  const zoomGroupRef = useRef<SVGGElement>(null);
+  const dragRef = useRef<{ id: string; offsetX: number; offsetY: number; moved: boolean } | null>(
+    null,
+  );
 
   useEffect(() => {
     Promise.all([entityList(null), relationshipList()])
@@ -41,7 +60,75 @@ export default function GraphScreen() {
       .catch((e) => setError(String(e)));
   }, []);
 
-  const positions = useMemo(() => circleLayout((entities ?? []).map((e) => e.id)), [entities]);
+  // Seeds a circle position for any entity that doesn't have one yet
+  // (first load, or a node added since); leaves already-placed nodes —
+  // including anything the user has dragged — untouched.
+  useEffect(() => {
+    if (!entities) return;
+    setPositions((prev) => {
+      const missing = entities.map((e) => e.id).filter((id) => !prev.has(id));
+      if (missing.length === 0) return prev;
+      const seeded = circleLayout(entities.map((e) => e.id));
+      const next = new Map(prev);
+      missing.forEach((id) => {
+        const p = seeded.get(id);
+        if (p) next.set(id, p);
+      });
+      return next;
+    });
+  }, [entities]);
+
+  // Converts a pointer event's screen coordinates into the zoom group's
+  // local coordinate space — the same space `positions` is stored in —
+  // via the group's own screen CTM, so this stays correct regardless of
+  // the SVG's rendered size (viewBox scaling) or the current zoom level.
+  function localPoint(e: React.PointerEvent): Point | null {
+    const svg = svgRef.current;
+    const group = zoomGroupRef.current;
+    if (!svg || !group) return null;
+    const ctm = group.getScreenCTM();
+    if (!ctm) return null;
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const local = pt.matrixTransform(ctm.inverse());
+    return { x: local.x, y: local.y };
+  }
+
+  function handleNodePointerDown(e: React.PointerEvent<SVGGElement>, id: string) {
+    const p = positions.get(id);
+    const local = localPoint(e);
+    if (!p || !local) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { id, offsetX: p.x - local.x, offsetY: p.y - local.y, moved: false };
+  }
+
+  function handleNodePointerMove(e: React.PointerEvent<SVGGElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const local = localPoint(e);
+    if (!local) return;
+    const nx = local.x + drag.offsetX;
+    const ny = local.y + drag.offsetY;
+    if (!drag.moved) {
+      const p = positions.get(drag.id);
+      if (p && Math.hypot(nx - p.x, ny - p.y) >= DRAG_THRESHOLD) drag.moved = true;
+    }
+    if (drag.moved) {
+      setPositions((prev) => {
+        const next = new Map(prev);
+        next.set(drag.id, { x: nx, y: ny });
+        return next;
+      });
+    }
+  }
+
+  function handleNodePointerUp(e: React.PointerEvent<SVGGElement>, id: string) {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (drag && !drag.moved) setFocusId(id);
+  }
 
   const adjacency = useMemo(() => {
     const m = new Map<string, { id: string; label: string }[]>();
@@ -90,12 +177,16 @@ export default function GraphScreen() {
 
         <div style={{ flex: 1, minHeight: 0, background: "#131318", position: "relative" }}>
           <svg
+            ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="xMidYMid meet"
             style={{ width: "100%", height: "100%", display: "block" }}
           >
             <rect x={0} y={0} width={W} height={H} fill="transparent" onClick={() => setFocusId(null)} />
-            <g transform={`translate(${((1 - zoom) * W) / 2},${((1 - zoom) * H) / 2}) scale(${zoom})`}>
+            <g
+              ref={zoomGroupRef}
+              transform={`translate(${((1 - zoom) * W) / 2},${((1 - zoom) * H) / 2}) scale(${zoom})`}
+            >
               {(relationships ?? []).map((r) => {
                 const a = positions.get(r.from);
                 const b = positions.get(r.to);
@@ -140,8 +231,10 @@ export default function GraphScreen() {
                   <g
                     key={e.id}
                     opacity={dim}
-                    style={{ cursor: "pointer" }}
-                    onClick={() => setFocusId(e.id)}
+                    style={{ cursor: "grab", touchAction: "none" }}
+                    onPointerDown={(ev) => handleNodePointerDown(ev, e.id)}
+                    onPointerMove={handleNodePointerMove}
+                    onPointerUp={(ev) => handleNodePointerUp(ev, e.id)}
                   >
                     {isFocus && <circle cx={p.x} cy={p.y} r={33} fill="none" stroke={ACCENT} strokeWidth={1.5} />}
                     <circle cx={p.x} cy={p.y} r={r} fill={st.bg} stroke={isFocus ? ACCENT : st.fg} strokeWidth={1.5} />
