@@ -340,6 +340,18 @@ pub(crate) fn reconcile_orphaned_runs(conn: &Connection) -> Result<(), EngineErr
     Ok(())
 }
 
+/// Compatibility with the target's entity type is always required, named
+/// or not — naming a plugin explicitly narrows *which* discovered plugins
+/// are eligible, it doesn't waive the type check. Found via a systematic
+/// post-release review: this used to skip the compatibility check
+/// entirely for an explicit `plugin_names` list, so an explicitly-named
+/// plugin declaring `input_entity_types = ["Email"]` would still run
+/// against an `IPAddress` target, silently handed a value its own
+/// manifest says it doesn't understand. An empty result here (name
+/// matched nothing, or matched something incompatible) surfaces the same
+/// `NoCompatiblePlugins` error either way — its message ("no discovered
+/// plugin ... is compatible with entity type ...") already reads
+/// correctly for both cases.
 fn select_plugins(
     manifests: Vec<PluginManifest>,
     plugin_names: &[String],
@@ -349,11 +361,9 @@ fn select_plugins(
     manifests
         .into_iter()
         .filter(|m| {
-            if plugin_names.is_empty() {
-                m.contract.input_entity_types.contains(&target_type_str)
-            } else {
-                plugin_names.iter().any(|n| n == &m.plugin.name)
-            }
+            let name_matches =
+                plugin_names.is_empty() || plugin_names.iter().any(|n| n == &m.plugin.name);
+            name_matches && m.contract.input_entity_types.contains(&target_type_str)
         })
         .collect()
 }
@@ -780,7 +790,7 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
-    use crate::{keystore, Case, EntityFilter, EntityType};
+    use crate::{keystore, Case, EntityFilter, EntityType, PluginRef};
 
     fn example_binary_path(name: &str) -> PathBuf {
         let mut path = std::env::current_exe().expect("current test binary path");
@@ -982,6 +992,58 @@ default_timeout_ms = {default_timeout_ms}
         assert_eq!(
             rel_count, 1,
             "the HasAccount relationship should be ingested too"
+        );
+
+        keystore::delete_key(case.id()).ok();
+    }
+
+    // Found via a systematic post-release review, not a prior test: an
+    // explicitly-named plugin used to skip the input_entity_types check
+    // entirely (select_plugins only name-matched, never re-checked
+    // compatibility once a name list was given) — so a Username-only
+    // plugin, named explicitly, would run against an Email target and
+    // silently be handed a value its own manifest says it doesn't
+    // understand. Compatibility must now be enforced either way.
+    #[test]
+    fn explicitly_named_plugin_incompatible_with_the_target_type_is_rejected() {
+        let base = tempfile::tempdir().unwrap();
+        let plugins_dir = base.path().join("plugins");
+        // write_manifest's fixture always declares input_entity_types = ["Username"].
+        write_manifest(&plugins_dir, "scan-ok", "scan_ok", 2000);
+
+        let mut case = Case::create(&base.path().join("case"), "incompatible-explicit").unwrap();
+        let target_id = case
+            .add_entity(
+                EntityType::Email,
+                Some("carol@example.com".to_string()),
+                vec![],
+                Provenance {
+                    source: "user".to_string(),
+                    source_version: "0.1.0".to_string(),
+                    source_url: None,
+                    retrieval_method: None,
+                    raw_response_sha256: None,
+                    collected_at_unix_ms: now_unix_ms(),
+                },
+            )
+            .unwrap();
+
+        let err = case
+            .create_scan(
+                &plugins_dir,
+                vec![PluginRef {
+                    name: "scan-ok".to_string(),
+                }],
+                TargetEntity { id: target_id },
+                ScanConfig::default(),
+                &TrustPolicy::AllowUnsigned,
+            )
+            .unwrap_err();
+
+        assert!(
+            matches!(err, EngineError::NoCompatiblePlugins(_, _)),
+            "an explicitly-named but type-incompatible plugin must be rejected the same way an \
+             empty auto-selection would be, not silently run: got {err:?}"
         );
 
         keystore::delete_key(case.id()).ok();
