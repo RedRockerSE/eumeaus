@@ -423,13 +423,19 @@ piece of this guide:
 Read it top to bottom before writing your own plugin from scratch —
 almost everything you need is one working example away.
 
-Two more real, shipped plugins are worth reading for patterns
+Three more real, shipped plugins are worth reading for patterns
 `username-search` doesn't cover: `crates/eumeaus-email-lookup-plugin/`
-(a second free-provider config pattern, no credentials) and
+(a second free-provider config pattern, no credentials);
 `crates/eumeaus-ip-lookup-plugin/` (a single HTTP call that emits
 *multiple* entity types — `Location` and `Organization` — and multiple
 relationship types from one response, rather than one entity per
-site/provider checked).
+site/provider checked); and `crates/eumeaus-domain-lookup-plugin/` (an
+`EntityFinding` with the *same* canonical key as the scan's own target
+auto-merges into that same entity instead of creating a new one — the
+pattern to reach for when a check genuinely enriches the thing you
+scanned, not just what's related to it — plus a real, non-obvious
+gotcha: the free API it calls sits behind bot-detection that rejects
+`reqwest`'s default User-Agent outright).
 
 ## 11. Where to look for more
 

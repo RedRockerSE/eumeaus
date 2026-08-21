@@ -1,0 +1,24 @@
+[package]
+name = "eumeaus-domain-lookup-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "eumeaus-domain-lookup-plugin"
+path = "src/main.rs"
+
+[dependencies]
+eumeaus-plugin-protocol.workspace = true
+eumeaus-plugin-sdk.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "io-util", "time"] }
+
+[dev-dependencies]
+wiremock.workspace = true

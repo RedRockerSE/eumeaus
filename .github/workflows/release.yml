@@ -55,7 +55,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} --bin eumeaus --bin eumeaus-username-search-plugin --bin eumeaus-email-lookup-plugin --bin eumeaus-ip-lookup-plugin
+        run: cargo build --release --target ${{ matrix.target }} --bin eumeaus --bin eumeaus-username-search-plugin --bin eumeaus-email-lookup-plugin --bin eumeaus-ip-lookup-plugin --bin eumeaus-domain-lookup-plugin
 
       - name: Package (Linux)
         if: matrix.archive_ext == 'tar.gz'
@@ -66,11 +66,12 @@ jobs:
           stage="eumeaus-${version}-${{ matrix.target }}"
           bin_dir="target/${{ matrix.target }}/release"
 
-          mkdir -p "$stage/plugins/username-search" "$stage/plugins/email-lookup" "$stage/plugins/ip-lookup"
+          mkdir -p "$stage/plugins/username-search" "$stage/plugins/email-lookup" "$stage/plugins/ip-lookup" "$stage/plugins/domain-lookup"
           cp "$bin_dir/eumeaus" "$stage/"
           cp "$bin_dir/eumeaus-username-search-plugin" "$stage/plugins/username-search/"
           cp "$bin_dir/eumeaus-email-lookup-plugin" "$stage/plugins/email-lookup/"
           cp "$bin_dir/eumeaus-ip-lookup-plugin" "$stage/plugins/ip-lookup/"
+          cp "$bin_dir/eumeaus-domain-lookup-plugin" "$stage/plugins/domain-lookup/"
           # entrypoint rewritten relative (portable to wherever this gets
           # unpacked) — the shipped plugin.toml's own entrypoint is an
           # illustrative absolute path, not meant for a real install.
@@ -83,6 +84,9 @@ jobs:
           sed 's#^entrypoint = .*#entrypoint = "eumeaus-ip-lookup-plugin"#' \
             crates/eumeaus-ip-lookup-plugin/plugin.toml \
             > "$stage/plugins/ip-lookup/plugin.toml"
+          sed 's#^entrypoint = .*#entrypoint = "eumeaus-domain-lookup-plugin"#' \
+            crates/eumeaus-domain-lookup-plugin/plugin.toml \
+            > "$stage/plugins/domain-lookup/plugin.toml"
           cp LICENSE-MIT LICENSE-APACHE CLI.md README.md "$stage/"
 
           tar czf "${stage}.tar.gz" "$stage"
@@ -100,10 +104,12 @@ jobs:
           New-Item -ItemType Directory -Path "$stage/plugins/username-search" -Force | Out-Null
           New-Item -ItemType Directory -Path "$stage/plugins/email-lookup" -Force | Out-Null
           New-Item -ItemType Directory -Path "$stage/plugins/ip-lookup" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$stage/plugins/domain-lookup" -Force | Out-Null
           Copy-Item "$binDir/eumeaus.exe" "$stage/"
           Copy-Item "$binDir/eumeaus-username-search-plugin.exe" "$stage/plugins/username-search/"
           Copy-Item "$binDir/eumeaus-email-lookup-plugin.exe" "$stage/plugins/email-lookup/"
           Copy-Item "$binDir/eumeaus-ip-lookup-plugin.exe" "$stage/plugins/ip-lookup/"
+          Copy-Item "$binDir/eumeaus-domain-lookup-plugin.exe" "$stage/plugins/domain-lookup/"
           (Get-Content crates/eumeaus-username-search-plugin/plugin.toml) `
             -replace '^entrypoint = .*', 'entrypoint = "eumeaus-username-search-plugin.exe"' |
             Set-Content "$stage/plugins/username-search/plugin.toml"
@@ -113,6 +119,9 @@ jobs:
           (Get-Content crates/eumeaus-ip-lookup-plugin/plugin.toml) `
             -replace '^entrypoint = .*', 'entrypoint = "eumeaus-ip-lookup-plugin.exe"' |
             Set-Content "$stage/plugins/ip-lookup/plugin.toml"
+          (Get-Content crates/eumeaus-domain-lookup-plugin/plugin.toml) `
+            -replace '^entrypoint = .*', 'entrypoint = "eumeaus-domain-lookup-plugin.exe"' |
+            Set-Content "$stage/plugins/domain-lookup/plugin.toml"
           Copy-Item LICENSE-MIT,LICENSE-APACHE,CLI.md,README.md "$stage/"
 
           # "$stage.zip" would be parsed as member access ($stage.zip

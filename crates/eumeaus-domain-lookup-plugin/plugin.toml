@@ -1,0 +1,42 @@
+# Reference manifest for the shipped domain-lookup plugin. Not used directly
+# by tests — those construct their own manifest pointing `entrypoint` at
+# wherever `cargo build`/`cargo test` actually put the compiled binary, and
+# sign it fresh (see tests/, eumeaus-cli's e2e test). This file exists to
+# show the real, shipped shape of the pair this crate produces: this
+# manifest sitting next to its binary. Mirrors
+# eumeaus-username-search-plugin/plugin.toml's own reference-manifest
+# convention.
+#
+# `signature` is intentionally left blank here: it covers
+# "{name}\n{version}\n{sha256(entrypoint binary)}" (see
+# eumeaus-plugin-host/src/signature.rs), so a valid one can only be
+# produced against this exact compiled artifact — computing it belongs to
+# the release/packaging step that builds and ships that artifact, not to
+# something checked into source control next to source that hasn't been
+# built yet.
+
+[plugin]
+name = "domain-lookup"
+version = "0.1.0"
+description = "Looks up domain registration data (registrar, dates, nameservers) via RDAP — free, no API key"
+author = "Eumeaus Core Team"
+signature = ""
+
+[compatibility]
+engine_min = "0.1.0"
+engine_max = "0.x"
+protocol_version = "1"
+
+[contract]
+input_entity_types = ["Domain"]
+output_entity_types = ["Domain", "Organization"]
+output_relationship_types = ["AssociatedWith"]
+
+[permissions]
+network = true
+requested_credentials = []
+
+[execution]
+entrypoint = "./eumeaus-domain-lookup-plugin"
+default_rate_limit_per_sec = 5
+default_timeout_ms = 8000
