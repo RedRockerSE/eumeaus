@@ -1,20 +1,32 @@
 import { useEffect, useState } from "react";
-import type { AttributeInput, AuditEvent, EntityDetail, EntitySummary, RelationshipDto } from "../api";
+import type {
+  AttributeInput,
+  AuditEvent,
+  EntityDetail,
+  EntityImageSummary,
+  EntitySummary,
+  RelationshipDto,
+} from "../api";
 import {
   entityAdd,
   entityAddFact,
+  entityAddImage,
   entityAudit,
+  entityGetImage,
   entityList,
+  entityListImages,
   entityMerge,
   entityShow,
   entitySplit,
+  factRedact,
   relationshipAdd,
   relationshipList,
 } from "../api";
 import { ENTITY_TYPES, RELATIONSHIP_TYPES, styleForEntityType } from "../entityStyle";
 import EntityPicker from "../components/EntityPicker";
+import { pickImageFile } from "../pickers";
 
-type Tab = "facts" | "links" | "history";
+type Tab = "facts" | "links" | "history" | "images";
 const CUSTOM_REL_TYPE = "__custom__";
 
 export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChanged: () => void }) {
@@ -48,6 +60,9 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
   const [customRelType, setCustomRelType] = useState("");
 
   const [history, setHistory] = useState<AuditEvent[] | null>(null);
+
+  const [images, setImages] = useState<EntityImageSummary[] | null>(null);
+  const [imageDataById, setImageDataById] = useState<Map<string, string>>(new Map());
 
   async function refresh() {
     setError(null);
@@ -87,6 +102,41 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
       .then(setHistory)
       .catch((e) => setError(String(e)));
   }, [selectedId, tab]);
+
+  // Fetched whenever the selection changes, independent of which tab is
+  // open — the header avatar (below) needs the current image's metadata
+  // even when the Images tab was never opened.
+  useEffect(() => {
+    if (!selectedId) {
+      setImages(null);
+      return;
+    }
+    entityListImages(selectedId)
+      .then(setImages)
+      .catch((e) => setError(String(e)));
+  }, [selectedId]);
+
+  // Lazily fetches image bytes: always for the current (avatar) image,
+  // and for every image once the Images tab is actually opened — a
+  // gallery of a few avatar-sized images doesn't need pagination, but
+  // there's no reason to fetch bytes for images nobody has looked at yet.
+  useEffect(() => {
+    if (!images) return;
+    const toFetch = tab === "images" ? images : images.filter((i) => i.is_current);
+    toFetch.forEach((img) => {
+      if (imageDataById.has(img.id)) return;
+      entityGetImage(img.id)
+        .then((data) => {
+          setImageDataById((prev) => {
+            const next = new Map(prev);
+            next.set(img.id, `data:${data.mime_type};base64,${data.data_base64}`);
+            return next;
+          });
+        })
+        .catch((e) => setError(String(e)));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [images, tab]);
 
   function selectEntity(id: string) {
     setSelectedId(id);
@@ -171,6 +221,34 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
     }
   }
 
+  async function addImage() {
+    if (!selectedId) return;
+    setError(null);
+    try {
+      const path = await pickImageFile();
+      if (!path) return; // user cancelled the dialog
+      await entityAddImage(selectedId, path);
+      const list = await entityListImages(selectedId);
+      setImages(list);
+      onEntitiesChanged(); // bumps the Overview screen's fact_count
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function removeImage(image: EntityImageSummary) {
+    if (!selectedId) return;
+    setError(null);
+    try {
+      await factRedact(image.fact_id, "removed via GUI");
+      const list = await entityListImages(selectedId);
+      setImages(list);
+      onEntitiesChanged();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function addRelationship(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedId || !relToId) return;
@@ -203,6 +281,8 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
   const relevantLinks = (relationships ?? []).filter(
     (r) => r.from === selectedId || r.to === selectedId,
   );
+  const currentImage = images?.find((i) => i.is_current);
+  const avatarUri = currentImage ? imageDataById.get(currentImage.id) : undefined;
 
   return (
     <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
@@ -316,9 +396,18 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
           <>
             <div style={{ padding: "18px 24px 0", borderBottom: "1px solid var(--border-subtle)" }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 14 }}>
-                <div className="badge badge-lg" style={{ background: selStyle.bg, color: selStyle.fg }}>
-                  {selStyle.abbr}
-                </div>
+                {avatarUri ? (
+                  <img
+                    src={avatarUri}
+                    alt=""
+                    className="badge-lg"
+                    style={{ objectFit: "cover", flex: "none" }}
+                  />
+                ) : (
+                  <div className="badge badge-lg" style={{ background: selStyle.bg, color: selStyle.fg }}>
+                    {selStyle.abbr}
+                  </div>
+                )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
                     <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{selected.display_label}</h2>
@@ -336,6 +425,9 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                     onClick={() => setAddFactOpen((v) => !v)}
                   >
                     Add fact…
+                  </button>
+                  <button className="btn" onClick={addImage}>
+                    Add image…
                   </button>
                   <button className="btn" onClick={() => setMergeOpen((v) => !v)}>
                     Merge…
@@ -388,7 +480,7 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
               )}
 
               <div className="tabs">
-                {(["facts", "links", "history"] as Tab[]).map((t) => (
+                {(["facts", "links", "history", "images"] as Tab[]).map((t) => (
                   <button key={t} className={"tab" + (tab === t ? " active" : "")} onClick={() => setTab(t)}>
                     {t[0].toUpperCase() + t.slice(1)}
                   </button>
@@ -527,6 +619,53 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                       </span>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {tab === "images" && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 14 }}>
+                  {images && images.length === 0 && <p className="muted">No images.</p>}
+                  {images?.map((img) => {
+                    const uri = imageDataById.get(img.id);
+                    return (
+                      <div key={img.id} className="card" style={{ width: 160, padding: 10 }}>
+                        <div
+                          style={{
+                            width: "100%",
+                            height: 140,
+                            borderRadius: 4,
+                            overflow: "hidden",
+                            background: "#191921",
+                            display: "grid",
+                            placeItems: "center",
+                          }}
+                        >
+                          {uri ? (
+                            <img src={uri} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          ) : (
+                            <span className="muted" style={{ fontSize: 11 }}>Loading…</span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+                          <span className="mono" style={{ fontSize: 10.5, color: "var(--text-mono-muted)" }}>
+                            {new Date(img.collected_at_unix_ms).toISOString().slice(0, 10)}
+                          </span>
+                          {img.is_current && (
+                            <span className="status-pill" style={{ background: "rgba(60,166,110,0.15)", color: "var(--ok)" }}>
+                              current
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          className="btn btn-small"
+                          style={{ width: "100%", marginTop: 8 }}
+                          onClick={() => removeImage(img)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -23,6 +23,15 @@ export async function pickCaseFile(): Promise<string | null> {
   return typeof result === "string" ? result : null;
 }
 
+export async function pickImageFile(): Promise<string | null> {
+  const result = await open({
+    directory: false,
+    multiple: false,
+    filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+  });
+  return typeof result === "string" ? result : null;
+}
+
 // A destination file that doesn't need to exist yet (e.g. an export
 // target) — `open()` above is for picking something that already
 // exists, this is Tauri's separate "Save As" dialog.

@@ -33,6 +33,19 @@ export interface EntityDetail extends EntitySummary {
   attributes: AttributeRecord[];
 }
 
+export interface EntityImageSummary {
+  id: string;
+  fact_id: string;
+  mime_type: string;
+  collected_at_unix_ms: number;
+  is_current: boolean;
+}
+
+export interface EntityImageData {
+  mime_type: string;
+  data_base64: string;
+}
+
 export interface AttributeInput {
   key: string;
   value: string;
@@ -112,6 +125,14 @@ export const entitySplit = (id: string, factIds: string[]) =>
   invoke<EntitySummary>("entity_split", { id, factIds });
 export const entityAddFact = (id: string, attrs: AttributeInput[]) =>
   invoke<EntityDetail>("entity_add_fact", { id, attrs });
+export const entityAddImage = (id: string, path: string) =>
+  invoke<EntityImageSummary>("entity_add_image", { id, path });
+export const entityListImages = (id: string) =>
+  invoke<EntityImageSummary[]>("entity_list_images", { id });
+export const entityGetImage = (imageId: string) =>
+  invoke<EntityImageData>("entity_get_image", { imageId });
+export const factRedact = (factId: string, reason: string) =>
+  invoke<void>("fact_redact", { factId, reason });
 export const relationshipAdd = (
   from: string,
   to: string,

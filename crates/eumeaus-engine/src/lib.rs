@@ -50,6 +50,8 @@ pub enum EngineError {
     FactNotFound(FactId, EntityId),
     #[error("fact not found: {0}")]
     UnknownFact(FactId),
+    #[error("image not found: {0}")]
+    ImageNotFound(ImageId),
     #[error("cannot merge an entity with itself: {0}")]
     CannotMergeSelf(EntityId),
     #[error("scan not found: {0}")]
@@ -99,6 +101,7 @@ uuid_id_type!(EntityId);
 uuid_id_type!(RelationshipId);
 uuid_id_type!(FactId);
 uuid_id_type!(ScanId);
+uuid_id_type!(ImageId);
 
 /// Starter taxonomy per SPEC.md §4.3 (open question: confirm before real
 /// implementation).
@@ -335,6 +338,29 @@ pub struct AttributeRecord {
     pub collected_at_unix_ms: i64,
     pub is_current: bool,
     pub conflicting: bool,
+}
+
+/// Metadata for one image attached to an entity — no BLOB, so listing an
+/// entity's images stays cheap even with several attached. `is_current`
+/// marks the most recently collected image (e.g. the one to show as a
+/// profile picture); unlike `AttributeRecord`, older images are never
+/// superseded/hidden — they're a gallery, not a single conflicting value.
+#[derive(Debug, Clone)]
+pub struct EntityImageSummary {
+    pub id: ImageId,
+    pub fact_id: FactId,
+    pub mime_type: String,
+    pub collected_at_unix_ms: i64,
+    pub is_current: bool,
+}
+
+/// The actual bytes for one image, fetched separately from
+/// [`EntityImageSummary`] so a gallery listing never has to load every
+/// image's data just to render metadata.
+#[derive(Debug, Clone)]
+pub struct EntityImageData {
+    pub mime_type: String,
+    pub data: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]

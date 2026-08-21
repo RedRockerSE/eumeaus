@@ -17,13 +17,18 @@ use uuid::Uuid;
 
 use crate::{
     crud, keystore, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, CaseStats,
-    CaseSummary, EngineError, Entity, EntityFilter, EntityId, EntityType, FactId, PluginRef,
-    Provenance, Relationship, RelationshipId, RelationshipType, ScanConfig, ScanId, ScanStatus,
-    ScanSummary, TargetEntity,
+    CaseSummary, EngineError, Entity, EntityFilter, EntityId, EntityImageData, EntityImageSummary,
+    EntityType, FactId, ImageId, PluginRef, Provenance, Relationship, RelationshipId,
+    RelationshipType, ScanConfig, ScanId, ScanStatus, ScanSummary, TargetEntity,
 };
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
-const SCHEMA_VERSION: &str = "1";
+// Idempotent CREATE TABLE/INDEX IF NOT EXISTS statements only — applied
+// both at Case::create time (below) and unconditionally on every
+// Case::open, since there is no schema-version-checked migration system.
+// See schema_additions.sql's own header comment for why.
+const SCHEMA_ADDITIONS_SQL: &str = include_str!("schema_additions.sql");
+const SCHEMA_VERSION: &str = "2";
 
 pub enum ExportFormat {
     /// Plaintext (unencrypted) SQLite copy — no key needed to read it back,
@@ -103,6 +108,7 @@ impl Case {
         let now = crate::now_unix_ms();
         let tx = conn.transaction()?;
         tx.execute_batch(SCHEMA_SQL)?;
+        tx.execute_batch(SCHEMA_ADDITIONS_SQL)?;
         {
             let mut insert_meta =
                 tx.prepare("INSERT INTO case_meta (key, value) VALUES (?1, ?2)")?;
@@ -141,6 +147,12 @@ impl Case {
         let conn = Connection::open(path)?;
         apply_key(&conn, &hex_key)?;
         verify_decryption(&conn, path)?;
+        // No schema-version-checked migration system exists — this case
+        // file may predate any table added to schema_additions.sql after
+        // it was created. Re-applying idempotent IF NOT EXISTS DDL on
+        // every open is the whole migration story (see the constant's
+        // doc comment above).
+        conn.execute_batch(SCHEMA_ADDITIONS_SQL)?;
         crate::scan::reconcile_orphaned_runs(&conn)?;
 
         let name = conn.query_row(
@@ -391,6 +403,27 @@ impl Case {
         provenance: Provenance,
     ) -> Result<FactId, EngineError> {
         crud::add_fact_to_entity(&mut self.conn, entity_id, attrs, provenance)
+    }
+
+    pub fn add_image_to_entity(
+        &mut self,
+        entity_id: EntityId,
+        mime_type: String,
+        data: Vec<u8>,
+        provenance: Provenance,
+    ) -> Result<FactId, EngineError> {
+        crud::add_image_to_entity(&mut self.conn, entity_id, mime_type, data, provenance)
+    }
+
+    pub fn list_entity_images(
+        &self,
+        entity_id: EntityId,
+    ) -> Result<Vec<EntityImageSummary>, EngineError> {
+        crud::list_entity_images(&self.conn, entity_id)
+    }
+
+    pub fn get_entity_image(&self, image_id: ImageId) -> Result<EntityImageData, EngineError> {
+        crud::get_entity_image(&self.conn, image_id)
     }
 
     pub fn merge_entities(
@@ -869,6 +902,123 @@ mod tests {
         assert_eq!(opened.id(), case_id);
         assert_eq!(opened.name(), "roundtrip");
         cleanup(&opened);
+    }
+
+    #[test]
+    fn an_uploaded_image_survives_close_and_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut created = Case::create(dir.path(), "image-roundtrip").unwrap();
+
+        let entity_id = created
+            .add_entity(EntityType::Person, None, vec![], test_provenance())
+            .unwrap();
+        created
+            .add_image_to_entity(
+                entity_id,
+                "image/jpeg".to_string(),
+                vec![10, 20, 30, 40],
+                test_provenance(),
+            )
+            .unwrap();
+        let case_path = created.path().to_path_buf();
+        created.close().unwrap();
+
+        let reopened = Case::open(&case_path).unwrap();
+        let images = reopened.list_entity_images(entity_id).unwrap();
+        assert_eq!(images.len(), 1);
+        let data = reopened.get_entity_image(images[0].id).unwrap();
+        assert_eq!(data.mime_type, "image/jpeg");
+        assert_eq!(data.data, vec![10, 20, 30, 40]);
+        cleanup(&reopened);
+    }
+
+    /// Reproduces exactly what a real case file created under v0.1.0-
+    /// v0.1.4 looks like: `init_case_file`'s own logic, minus
+    /// `SCHEMA_ADDITIONS_SQL` — those releases' `schema.sql` never
+    /// contained `entity_images`, so applying `SCHEMA_SQL` alone is the
+    /// real old shape, not a guess at it.
+    fn init_case_file_without_new_tables(
+        case_path: &Path,
+        case_id: Uuid,
+        name: &str,
+        hex_key: &str,
+    ) -> Result<Case, EngineError> {
+        let lock = lock_exclusive(case_path)?;
+
+        let mut conn = Connection::open(case_path)?;
+        apply_key(&conn, hex_key)?;
+
+        let now = crate::now_unix_ms();
+        let tx = conn.transaction()?;
+        tx.execute_batch(SCHEMA_SQL)?;
+        {
+            let mut insert_meta =
+                tx.prepare("INSERT INTO case_meta (key, value) VALUES (?1, ?2)")?;
+            insert_meta.execute(params!["case_id", case_id.to_string()])?;
+            insert_meta.execute(params!["name", name])?;
+            insert_meta.execute(params!["schema_version", "1"])?;
+            insert_meta.execute(params!["created_at", now.to_string()])?;
+        }
+        tx.commit()?;
+
+        fs::write(meta_path_for(case_path), case_id.to_string())?;
+
+        Ok(Case {
+            path: case_path.to_path_buf(),
+            case_id,
+            name: name.to_string(),
+            conn,
+            _lock: lock,
+        })
+    }
+
+    #[test]
+    fn opening_a_pre_entity_images_case_backfills_the_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let case_path = dir.path().join("old.eum");
+        let case_id = Uuid::new_v4();
+        let hex_key = keystore::create_key(case_id).unwrap();
+
+        let old_case =
+            init_case_file_without_new_tables(&case_path, case_id, "old", &hex_key).unwrap();
+        // Confirm this test is honestly reproducing the old shape, not
+        // accidentally passing because the table was there all along.
+        let table_count: i64 = old_case
+            .conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'entity_images'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            table_count, 0,
+            "old_case must not already have entity_images"
+        );
+        old_case.close().unwrap();
+
+        // The real production code path a user reopening an old case takes.
+        let mut reopened = Case::open(&case_path).unwrap();
+
+        let entity_id = reopened
+            .add_entity(EntityType::Person, None, vec![], test_provenance())
+            .unwrap();
+        reopened
+            .add_image_to_entity(
+                entity_id,
+                "image/png".to_string(),
+                vec![1, 2, 3],
+                test_provenance(),
+            )
+            .unwrap();
+        let images = reopened.list_entity_images(entity_id).unwrap();
+        assert_eq!(
+            images.len(),
+            1,
+            "entity_images must exist and be usable after reopening an old case"
+        );
+
+        cleanup(&reopened);
     }
 
     #[test]
