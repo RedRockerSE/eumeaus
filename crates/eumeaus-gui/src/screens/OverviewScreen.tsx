@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AuditEvent, CaseInfo, CaseStats } from "../api";
 import { auditList, caseExport, caseStats, reportVerify } from "../api";
+import { pickSaveFile } from "../pickers";
 
 function fmtTime(ms: number): string {
   const d = new Date(ms);
@@ -8,6 +9,16 @@ function fmtTime(ms: number): string {
 }
 
 type ExportFormat = "sqlite" | "report" | "html" | "portable";
+
+// Matches CLI.md's own case export examples exactly (acme.sqlite,
+// acme-report.json, acme-report.html, handoff.eumx) — same extensions
+// a CLI-driven export would naturally use.
+const EXPORT_EXTENSION: Record<ExportFormat, { ext: string; filterName: string }> = {
+  sqlite: { ext: "sqlite", filterName: "SQLite database" },
+  report: { ext: "json", filterName: "JSON report" },
+  html: { ext: "html", filterName: "HTML report" },
+  portable: { ext: "eumx", filterName: "Portable case" },
+};
 
 // Report export + signature verify (SPEC.md §9.3) — the one screen the
 // dogfooding pass found missing from both G0–G6 and the design handover.
@@ -20,6 +31,14 @@ function ExportCard({ current }: { current: CaseInfo }) {
   const [signKeyHex, setSignKeyHex] = useState("");
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function browseForOut() {
+    const { ext, filterName } = EXPORT_EXTENSION[format];
+    const picked = await pickSaveFile(`${current.name}.${ext}`, [
+      { name: filterName, extensions: [ext] },
+    ]);
+    if (picked) setOut(picked);
+  }
 
   async function doExport(e: React.FormEvent) {
     e.preventDefault();
@@ -62,6 +81,9 @@ function ExportCard({ current }: { current: CaseInfo }) {
             onChange={(e) => setOut(e.currentTarget.value)}
             placeholder="Output path"
           />
+          <button type="button" className="btn" onClick={browseForOut}>
+            Browse…
+          </button>
         </div>
         {format === "portable" && (
           <input

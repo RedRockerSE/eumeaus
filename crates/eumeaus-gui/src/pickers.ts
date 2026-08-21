@@ -7,7 +7,7 @@
 // fills the field, it doesn't replace typing (a user who already knows
 // the path shouldn't be forced through a dialog).
 
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 
 export async function pickDirectory(): Promise<string | null> {
   const result = await open({ directory: true, multiple: false });
@@ -20,5 +20,16 @@ export async function pickCaseFile(): Promise<string | null> {
     multiple: false,
     filters: [{ name: "Eumeaus case", extensions: ["eum"] }],
   });
+  return typeof result === "string" ? result : null;
+}
+
+// A destination file that doesn't need to exist yet (e.g. an export
+// target) — `open()` above is for picking something that already
+// exists, this is Tauri's separate "Save As" dialog.
+export async function pickSaveFile(
+  defaultPath?: string,
+  filters?: { name: string; extensions: string[] }[],
+): Promise<string | null> {
+  const result = await save({ defaultPath, filters });
   return typeof result === "string" ? result : null;
 }
