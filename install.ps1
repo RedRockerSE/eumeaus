@@ -80,11 +80,16 @@ try {
     New-Item -ItemType Directory -Path $IpPluginDir -Force | Out-Null
     Copy-Item (Join-Path $ExtractedDir "plugins\ip-lookup\*") $IpPluginDir -Force -Recurse
 
+    $DomainPluginDir = Join-Path $InstallDir "eumeaus-plugins\domain-lookup"
+    New-Item -ItemType Directory -Path $DomainPluginDir -Force | Out-Null
+    Copy-Item (Join-Path $ExtractedDir "plugins\domain-lookup\*") $DomainPluginDir -Force -Recurse
+
     Write-Host ""
     Write-Host "Installed eumeaus $Version to $InstallDir\eumeaus.exe"
     Write-Host "Installed the bundled username-search plugin to $PluginDir"
     Write-Host "Installed the bundled email-lookup plugin to $EmailPluginDir"
     Write-Host "Installed the bundled ip-lookup plugin to $IpPluginDir"
+    Write-Host "Installed the bundled domain-lookup plugin to $DomainPluginDir"
 
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($UserPath -notlike "*$InstallDir*") {

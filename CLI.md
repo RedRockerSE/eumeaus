@@ -325,14 +325,17 @@ default_timeout_ms = 8000
 
 `eumeaus-username-search-plugin`, this project's real plugin, is built
 right alongside the CLI (`cargo build --workspace` produces
-`target/debug/eumeaus-username-search-plugin`). Two more real plugins are
-built the same way: `eumeaus-email-lookup-plugin` (checks whether an
+`target/debug/eumeaus-username-search-plugin`). Three more real plugins
+are built the same way: `eumeaus-email-lookup-plugin` (checks whether an
 email address has a registered Gravatar/Libravatar avatar —
-`input_entity_types = ["Email"]`) and `eumeaus-ip-lookup-plugin`
+`input_entity_types = ["Email"]`), `eumeaus-ip-lookup-plugin`
 (geolocates an IP address via ip-api.com — `input_entity_types =
-["IPAddress"]`, `output_entity_types = ["Location", "Organization"]`).
+["IPAddress"]`, `output_entity_types = ["Location", "Organization"]`),
+and `eumeaus-domain-lookup-plugin` (looks up a domain's registration
+data via RDAP — `input_entity_types = ["Domain"]`, enriches the target
+domain itself and emits a related `Organization` for the registrar).
 See [`plugin-developer-guide.md`](./plugin-developer-guide.md) if you
-want to write a fourth.
+want to write a fifth.
 
 **Configuring which sites `username-search` checks.** The site list isn't
 hardcoded — drop a `sites.toml` next to `username-search`'s `plugin.toml`
