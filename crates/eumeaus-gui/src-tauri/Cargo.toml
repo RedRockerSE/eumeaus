@@ -44,6 +44,11 @@ tauri-plugin-process = "2"
 # Native OS file/directory pickers (exploratory test §1/§2: path fields
 # shouldn't be type-only).
 tauri-plugin-dialog = "2"
+# entity_state.rs's entity_get_image: transports an image's bytes to the
+# frontend as a data URI. Already used elsewhere in the workspace
+# (eumeaus-plugin-host's signature.rs/detached_signature.rs), just not
+# pulled into this crate yet.
+base64.workspace = true
 
 [dev-dependencies]
 tempfile = "3.13.0"

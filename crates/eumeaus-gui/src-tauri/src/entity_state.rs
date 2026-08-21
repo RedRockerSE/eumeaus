@@ -17,11 +17,13 @@
 //! `Mutex<Option<Case>>` — no case open is a normal, expected error here
 //! ("open a case first"), not a bug.
 
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use base64::Engine;
 use eumeaus_engine::{
-    Actor, Attribute, Case, EntityFilter, EntityId, EntityType, Provenance, Relationship,
-    RelationshipType,
+    Actor, Attribute, Case, EntityFilter, EntityId, EntityType, FactId, ImageId, Provenance,
+    Relationship, RelationshipType,
 };
 use serde::{Deserialize, Serialize};
 
@@ -123,6 +125,67 @@ pub struct EntityDetail {
     pub attributes: Vec<AttributeRecordDto>,
 }
 
+#[derive(Serialize, Debug)]
+pub struct EntityImageSummaryDto {
+    pub id: String,
+    pub fact_id: String,
+    pub mime_type: String,
+    pub collected_at_unix_ms: i64,
+    pub is_current: bool,
+}
+
+impl From<eumeaus_engine::EntityImageSummary> for EntityImageSummaryDto {
+    fn from(i: eumeaus_engine::EntityImageSummary) -> Self {
+        EntityImageSummaryDto {
+            id: i.id.to_string(),
+            fact_id: i.fact_id.to_string(),
+            mime_type: i.mime_type,
+            collected_at_unix_ms: i.collected_at_unix_ms,
+            is_current: i.is_current,
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+pub struct EntityImageDataDto {
+    pub mime_type: String,
+    pub data_base64: String,
+}
+
+impl From<eumeaus_engine::EntityImageData> for EntityImageDataDto {
+    fn from(i: eumeaus_engine::EntityImageData) -> Self {
+        EntityImageDataDto {
+            mime_type: i.mime_type,
+            data_base64: base64::engine::general_purpose::STANDARD.encode(i.data),
+        }
+    }
+}
+
+// Bounded to what the picker's own filter already allows (see
+// pickers.ts's pickImageFile) — a fixed, known set, so a real
+// content-sniffing dependency (mime_guess et al.) would be solving a
+// bigger problem than this feature actually has.
+fn mime_type_for_extension(path: &Path) -> Result<&'static str, String> {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => Ok("image/png"),
+        Some("jpg") | Some("jpeg") => Ok("image/jpeg"),
+        Some("gif") => Ok("image/gif"),
+        Some("webp") => Ok("image/webp"),
+        _ => Err("unsupported image type — expected .png, .jpg, .jpeg, .gif, or .webp".to_string()),
+    }
+}
+
+// Avatar-shaped images only for phase one — keeps the base64-over-JSON
+// transport and the case DB's own size bounded and fast. A real
+// full-resolution photo gallery would need a different transport
+// (Tauri's asset protocol) and is out of scope here.
+const MAX_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+
 const NO_CASE_OPEN: &str = "no case is currently open — open a case first";
 
 fn do_entity_list(
@@ -212,6 +275,90 @@ fn do_entity_add_fact(
     })
 }
 
+/// Attaches an image to an entity (SPEC.md §9.3's "attach a profile
+/// picture" idea) — `Case::add_image_to_entity`'s GUI-only affordance,
+/// same precedent as `entity_add_fact`. `path` comes from the native
+/// picker (`pickImageFile()`); the file is read here, server-side, never
+/// pushed through the JS→Rust IPC boundary as a JSON byte array.
+fn do_entity_add_image(
+    cell: &Arc<Mutex<Option<Case>>>,
+    id: &str,
+    path: &Path,
+) -> Result<EntityImageSummaryDto, String> {
+    let entity_id = EntityId(id.parse().map_err(|e| format!("invalid entity id: {e}"))?);
+    let mime_type = mime_type_for_extension(path)?;
+
+    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if size > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "image is too large ({:.1} MiB, max {} MiB)",
+            size as f64 / (1024.0 * 1024.0),
+            MAX_IMAGE_BYTES / (1024 * 1024),
+        ));
+    }
+    let data = std::fs::read(path).map_err(|e| e.to_string())?;
+
+    let mut guard = cell.lock().unwrap();
+    let case = guard.as_mut().ok_or(NO_CASE_OPEN)?;
+    case.add_image_to_entity(entity_id, mime_type.to_string(), data, manual_provenance())
+        .map_err(|e| e.to_string())?;
+
+    case.list_entity_images(entity_id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|i| i.is_current)
+        .map(EntityImageSummaryDto::from)
+        .ok_or_else(|| "image uploaded but not found on re-list".to_string())
+}
+
+fn do_entity_list_images(
+    cell: &Arc<Mutex<Option<Case>>>,
+    id: &str,
+) -> Result<Vec<EntityImageSummaryDto>, String> {
+    let guard = cell.lock().unwrap();
+    let case = guard.as_ref().ok_or(NO_CASE_OPEN)?;
+    let entity_id = EntityId(id.parse().map_err(|e| format!("invalid entity id: {e}"))?);
+    case.list_entity_images(entity_id)
+        .map(|imgs| imgs.into_iter().map(EntityImageSummaryDto::from).collect())
+        .map_err(|e| e.to_string())
+}
+
+fn do_entity_get_image(
+    cell: &Arc<Mutex<Option<Case>>>,
+    image_id: &str,
+) -> Result<EntityImageDataDto, String> {
+    let guard = cell.lock().unwrap();
+    let case = guard.as_ref().ok_or(NO_CASE_OPEN)?;
+    let image_id = ImageId(
+        image_id
+            .parse()
+            .map_err(|e| format!("invalid image id: {e}"))?,
+    );
+    case.get_entity_image(image_id)
+        .map(EntityImageDataDto::from)
+        .map_err(|e| e.to_string())
+}
+
+/// `fact redact` (SPEC.md §8.4) had no GUI command until now — CLI-only.
+/// Needed here so a mis-uploaded image (or any other fact) can actually
+/// be removed from the GUI; not image-specific itself, `Case::redact_fact`
+/// already deletes the associated `entity_images` row for free.
+fn do_fact_redact(
+    cell: &Arc<Mutex<Option<Case>>>,
+    fact_id: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let mut guard = cell.lock().unwrap();
+    let case = guard.as_mut().ok_or(NO_CASE_OPEN)?;
+    let fact_id = FactId(
+        fact_id
+            .parse()
+            .map_err(|e| format!("invalid fact id: {e}"))?,
+    );
+    case.redact_fact(fact_id, default_actor(), reason)
+        .map_err(|e| e.to_string())
+}
+
 fn do_entity_merge(
     cell: &Arc<Mutex<Option<Case>>>,
     id1: &str,
@@ -299,6 +446,52 @@ pub async fn entity_add_fact(
 ) -> Result<EntityDetail, String> {
     let cell = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || do_entity_add_fact(&cell, &id, attrs))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn entity_add_image(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    path: String,
+) -> Result<EntityImageSummaryDto, String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_add_image(&cell, &id, Path::new(&path)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn entity_list_images(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<Vec<EntityImageSummaryDto>, String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_list_images(&cell, &id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn entity_get_image(
+    state: tauri::State<'_, AppState>,
+    image_id: String,
+) -> Result<EntityImageDataDto, String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_get_image(&cell, &image_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn fact_redact(
+    state: tauri::State<'_, AppState>,
+    fact_id: String,
+    reason: String,
+) -> Result<(), String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_fact_redact(&cell, &fact_id, &reason))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -594,6 +787,110 @@ mod tests {
         let cell: Arc<Mutex<Option<Case>>> = Arc::new(Mutex::new(None));
         assert_eq!(
             do_entity_add_fact(&cell, "00000000-0000-0000-0000-000000000000", vec![]).unwrap_err(),
+            NO_CASE_OPEN
+        );
+    }
+
+    #[test]
+    fn entity_add_image_rejects_an_unsupported_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "g-image-bad-ext").unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let bad_path = dir.path().join("not-an-image.txt");
+        std::fs::write(&bad_path, b"hello").unwrap();
+
+        let err = do_entity_add_image(&cell, "00000000-0000-0000-0000-000000000000", &bad_path)
+            .unwrap_err();
+        assert!(err.contains("unsupported image type"));
+    }
+
+    #[test]
+    fn entity_add_image_rejects_an_oversized_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-image-too-big").unwrap();
+        let id = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let big_path = dir.path().join("huge.png");
+        let oversized = vec![0u8; (MAX_IMAGE_BYTES + 1) as usize];
+        std::fs::write(&big_path, &oversized).unwrap();
+
+        let err = do_entity_add_image(&cell, &id.to_string(), &big_path).unwrap_err();
+        assert!(err.contains("too large"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn entity_add_image_round_trips_through_list_and_get() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-image-roundtrip").unwrap();
+        let id = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let image_path = dir.path().join("avatar.png");
+        std::fs::write(&image_path, [1, 2, 3, 4, 5]).unwrap();
+
+        let added = do_entity_add_image(&cell, &id.to_string(), &image_path).unwrap();
+        assert_eq!(added.mime_type, "image/png");
+        assert!(added.is_current);
+
+        let listed = do_entity_list_images(&cell, &id.to_string()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, added.id);
+
+        let fetched = do_entity_get_image(&cell, &added.id).unwrap();
+        assert_eq!(fetched.mime_type, "image/png");
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&fetched.data_base64)
+            .unwrap();
+        assert_eq!(decoded, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn fact_redact_removes_an_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-image-redact").unwrap();
+        let id = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let image_path = dir.path().join("avatar.png");
+        std::fs::write(&image_path, [9, 9, 9]).unwrap();
+        let added = do_entity_add_image(&cell, &id.to_string(), &image_path).unwrap();
+
+        do_fact_redact(&cell, &added.fact_id, "wrong photo").unwrap();
+
+        let listed = do_entity_list_images(&cell, &id.to_string()).unwrap();
+        assert!(listed.is_empty());
+    }
+
+    #[test]
+    fn image_commands_error_cleanly_with_no_case_open() {
+        let cell: Arc<Mutex<Option<Case>>> = Arc::new(Mutex::new(None));
+        let dir = tempfile::tempdir().unwrap();
+        let image_path = dir.path().join("avatar.png");
+        std::fs::write(&image_path, [1]).unwrap();
+
+        assert_eq!(
+            do_entity_add_image(&cell, "00000000-0000-0000-0000-000000000000", &image_path)
+                .unwrap_err(),
+            NO_CASE_OPEN
+        );
+        assert_eq!(
+            do_entity_list_images(&cell, "00000000-0000-0000-0000-000000000000").unwrap_err(),
+            NO_CASE_OPEN
+        );
+        assert_eq!(
+            do_entity_get_image(&cell, "00000000-0000-0000-0000-000000000000").unwrap_err(),
+            NO_CASE_OPEN
+        );
+        assert_eq!(
+            do_fact_redact(&cell, "00000000-0000-0000-0000-000000000000", "reason").unwrap_err(),
             NO_CASE_OPEN
         );
     }

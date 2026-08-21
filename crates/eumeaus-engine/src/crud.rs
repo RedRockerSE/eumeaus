@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use crate::{
     now_unix_ms, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, ConfidenceStatus,
-    EngineError, Entity, EntityFilter, EntityId, EntityType, FactId, Provenance, Relationship,
-    RelationshipId, RelationshipType,
+    EngineError, Entity, EntityFilter, EntityId, EntityImageData, EntityImageSummary, EntityType,
+    FactId, ImageId, Provenance, Relationship, RelationshipId, RelationshipType,
 };
 
 fn normalize_key(raw: &str) -> String {
@@ -319,6 +319,117 @@ pub(crate) fn add_fact_to_entity(
     Ok(FactId(fact_id))
 }
 
+/// Attaches an image to an existing entity — the image-upload equivalent
+/// of [`add_fact_to_entity`]: one new fact carrying `provenance`, plus one
+/// `entity_images` row tied to it. No entity type is privileged (SPEC.md
+/// §4.2) — this works on any `entity_id`, same as `add_fact_to_entity`.
+pub(crate) fn add_image_to_entity(
+    conn: &mut Connection,
+    entity_id: EntityId,
+    mime_type: String,
+    data: Vec<u8>,
+    provenance: Provenance,
+) -> Result<FactId, EngineError> {
+    let now = now_unix_ms();
+    let tx = conn.transaction()?;
+    ensure_entity_exists(&tx, entity_id)?;
+
+    tx.execute(
+        "UPDATE entities SET updated_at = ?1 WHERE id = ?2",
+        params![now, entity_id.0.to_string()],
+    )?;
+
+    let fact_id = Uuid::new_v4();
+    tx.execute(
+        "INSERT INTO facts
+            (id, entity_id, relationship_id, scan_id, source, source_version,
+             confidence_status, source_url, retrieval_method, raw_response_sha256, collected_at)
+         VALUES (?1, ?2, NULL, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            fact_id.to_string(),
+            entity_id.0.to_string(),
+            provenance.source,
+            provenance.source_version,
+            ConfidenceStatus::Found.to_string(),
+            provenance.source_url,
+            provenance.retrieval_method,
+            provenance.raw_response_sha256,
+            provenance.collected_at_unix_ms,
+        ],
+    )?;
+
+    tx.execute(
+        "INSERT INTO entity_images (id, entity_id, fact_id, mime_type, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            Uuid::new_v4().to_string(),
+            entity_id.0.to_string(),
+            fact_id.to_string(),
+            mime_type,
+            data,
+        ],
+    )?;
+
+    tx.commit()?;
+    Ok(FactId(fact_id))
+}
+
+/// Metadata (no BLOB) for every image on an entity, newest first. Mirrors
+/// [`attribute_records_from_table`]'s "most recent wins, but nothing is
+/// ever hidden" rule: the first (newest) row is flagged `is_current` for
+/// e.g. a profile-picture display, but every image stays listed — a
+/// gallery, not a single overwritten slot.
+pub(crate) fn list_entity_images(
+    conn: &Connection,
+    entity_id: EntityId,
+) -> Result<Vec<EntityImageSummary>, EngineError> {
+    ensure_entity_exists(conn, entity_id)?;
+    let mut stmt = conn.prepare(
+        "SELECT i.id, i.fact_id, i.mime_type, f.collected_at
+         FROM entity_images i JOIN facts f ON f.id = i.fact_id
+         WHERE i.entity_id = ?1
+         ORDER BY f.collected_at DESC",
+    )?;
+    let rows: Vec<(String, String, String, i64)> = stmt
+        .query_map(params![entity_id.0.to_string()], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect::<Result<_, _>>()?;
+
+    Ok(rows
+        .into_iter()
+        .enumerate()
+        .map(
+            |(i, (id, fact_id, mime_type, collected_at))| EntityImageSummary {
+                id: ImageId(Uuid::parse_str(&id).expect("stored image id is a valid uuid")),
+                fact_id: FactId(Uuid::parse_str(&fact_id).expect("stored fact id is a valid uuid")),
+                mime_type,
+                collected_at_unix_ms: collected_at,
+                is_current: i == 0,
+            },
+        )
+        .collect())
+}
+
+/// The bytes for one image, fetched by its own id (not `fact_id` — a
+/// single fact may in principle carry more than one image row).
+pub(crate) fn get_entity_image(
+    conn: &Connection,
+    image_id: ImageId,
+) -> Result<EntityImageData, EngineError> {
+    conn.query_row(
+        "SELECT mime_type, data FROM entity_images WHERE id = ?1",
+        params![image_id.0.to_string()],
+        |row| {
+            Ok(EntityImageData {
+                mime_type: row.get(0)?,
+                data: row.get(1)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or(EngineError::ImageNotFound(image_id))
+}
+
 /// Absorbs `b` into `a`: re-points `b`'s facts, attributes, and
 /// relationship endpoints at `a`, deletes `b`'s now-empty entity row, and
 /// records the merge as an `audit_events` row (SPEC.md §4.4) — the
@@ -507,6 +618,10 @@ pub(crate) fn redact_fact(
     )?;
     tx.execute(
         "DELETE FROM relationship_attributes WHERE fact_id = ?1",
+        params![fact_id.0.to_string()],
+    )?;
+    tx.execute(
+        "DELETE FROM entity_images WHERE fact_id = ?1",
         params![fact_id.0.to_string()],
     )?;
     tx.execute(
@@ -853,10 +968,12 @@ mod tests {
     use super::*;
 
     const SCHEMA_SQL: &str = include_str!("schema.sql");
+    const SCHEMA_ADDITIONS_SQL: &str = include_str!("schema_additions.sql");
 
     fn test_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA_SQL).unwrap();
+        conn.execute_batch(SCHEMA_ADDITIONS_SQL).unwrap();
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         conn
     }
@@ -979,6 +1096,153 @@ mod tests {
 
         let err = add_fact_to_entity(&mut conn, bogus, vec![], test_provenance()).unwrap_err();
         assert!(matches!(err, EngineError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn add_image_to_entity_attaches_an_image_and_creates_a_fact() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("dave".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let fact_id = add_image_to_entity(
+            &mut conn,
+            id,
+            "image/png".to_string(),
+            vec![1, 2, 3, 4],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let images = list_entity_images(&conn, id).unwrap();
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].fact_id, fact_id);
+        assert_eq!(images[0].mime_type, "image/png");
+        assert!(images[0].is_current);
+
+        let data = get_entity_image(&conn, images[0].id).unwrap();
+        assert_eq!(data.mime_type, "image/png");
+        assert_eq!(data.data, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn add_image_to_entity_works_on_a_keyless_entity() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        add_image_to_entity(
+            &mut conn,
+            id,
+            "image/jpeg".to_string(),
+            vec![9, 9],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let images = list_entity_images(&conn, id).unwrap();
+        assert_eq!(images.len(), 1);
+    }
+
+    #[test]
+    fn add_image_to_entity_errors_on_an_unknown_entity() {
+        let mut conn = test_conn();
+        let bogus = EntityId(Uuid::new_v4());
+
+        let err = add_image_to_entity(
+            &mut conn,
+            bogus,
+            "image/png".to_string(),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, EngineError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn list_entity_images_orders_newest_first_and_flags_current() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("erin".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let mut older = test_provenance();
+        older.collected_at_unix_ms = 1000;
+        let older_fact =
+            add_image_to_entity(&mut conn, id, "image/png".to_string(), vec![1], older).unwrap();
+
+        let mut newer = test_provenance();
+        newer.collected_at_unix_ms = 2000;
+        let newer_fact =
+            add_image_to_entity(&mut conn, id, "image/png".to_string(), vec![2], newer).unwrap();
+
+        let images = list_entity_images(&conn, id).unwrap();
+        assert_eq!(
+            images.len(),
+            2,
+            "neither image is ever hidden, it's a gallery"
+        );
+        assert_eq!(images[0].fact_id, newer_fact);
+        assert!(images[0].is_current);
+        assert_eq!(images[1].fact_id, older_fact);
+        assert!(!images[1].is_current);
+    }
+
+    #[test]
+    fn list_entity_images_is_a_gallery_not_a_single_slot() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("frank".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        for i in 0..3u8 {
+            add_image_to_entity(
+                &mut conn,
+                id,
+                "image/png".to_string(),
+                vec![i],
+                test_provenance(),
+            )
+            .unwrap();
+        }
+
+        let images = list_entity_images(&conn, id).unwrap();
+        assert_eq!(
+            images.len(),
+            3,
+            "no dedup/overwrite for images unlike keyed attributes"
+        );
+    }
+
+    #[test]
+    fn get_entity_image_errors_on_an_unknown_image_id() {
+        let conn = test_conn();
+        let bogus = crate::ImageId(Uuid::new_v4());
+
+        let err = get_entity_image(&conn, bogus).unwrap_err();
+        assert!(matches!(err, EngineError::ImageNotFound(_)));
     }
 
     #[test]
@@ -1254,6 +1518,46 @@ mod tests {
         // The entity itself survives, as a graph node.
         let entity = get_entity(&conn, id).unwrap();
         assert_eq!(entity.id, id);
+    }
+
+    #[test]
+    fn redact_fact_deletes_the_associated_image_too() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let fact_id = add_image_to_entity(
+            &mut conn,
+            id,
+            "image/png".to_string(),
+            vec![1, 2, 3],
+            test_provenance(),
+        )
+        .unwrap();
+
+        redact_fact(&mut conn, fact_id, actor(), "wrong photo uploaded").unwrap();
+
+        assert!(list_entity_images(&conn, id).unwrap().is_empty());
+        let fact_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM facts WHERE id = ?1",
+                params![fact_id.0.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fact_count, 0);
+
+        let events = audit_trail(&conn, AuditTarget::Entity(id)).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(
+            !events[0].description.contains("image/png"),
+            "the audit trail must not need to carry image content"
+        );
     }
 
     #[test]

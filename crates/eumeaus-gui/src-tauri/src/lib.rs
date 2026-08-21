@@ -11,8 +11,9 @@ mod trust_state;
 use case_state::{case_close, case_create, case_current, case_list, case_open, AppState};
 use credential_state::{credential_list, credential_remove, credential_set};
 use entity_state::{
-    entity_add, entity_add_fact, entity_audit, entity_list, entity_merge, entity_show,
-    entity_split, relationship_add, relationship_list,
+    entity_add, entity_add_fact, entity_add_image, entity_audit, entity_get_image, entity_list,
+    entity_list_images, entity_merge, entity_show, entity_split, fact_redact, relationship_add,
+    relationship_list,
 };
 use overview_state::{audit_list, case_stats};
 use plugin_state::{plugin_install, plugin_list, plugin_verify};
@@ -79,6 +80,10 @@ pub fn run() {
             entity_show,
             entity_add,
             entity_add_fact,
+            entity_add_image,
+            entity_list_images,
+            entity_get_image,
+            fact_redact,
             entity_merge,
             entity_split,
             entity_audit,
