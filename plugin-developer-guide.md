@@ -437,6 +437,28 @@ scanned, not just what's related to it — plus a real, non-obvious
 gotcha: the free API it calls sits behind bot-detection that rejects
 `reqwest`'s default User-Agent outright).
 
+A fourth, `crates/eumeaus-crypto-wallet-plugin/`, is worth reading for a
+variant `domain-lookup` doesn't cover: *self-enrichment only*, with no
+paired new-entity creation. Its `output_entity_types` is just
+`["CryptoWallet"]` — the same type it takes as input — because a
+wallet's balance and transaction count are facts *about the target
+itself*, not evidence of some other, related thing. Its
+`EntityFinding.canonical_key` is set to the same address that was
+scanned, so the same exact-`(entity_type, canonical_key)` auto-merge
+folds the new facts straight onto the existing entity — no
+`RelationshipFinding`s emitted at all.
+
+This plugin is also why `CheckRequest.input_value` is populated from the
+target entity's `display_label` rather than its `canonical_key`
+(`eumeaus-engine/src/scan.rs`'s `build_check_request`): `canonical_key` is
+deliberately normalized (trimmed + lowercased) for case-insensitive
+matching, which is fine for matching but would silently corrupt a
+genuinely case-sensitive identifier like a base58check Bitcoin address if
+it were what got sent to the real API. `display_label` preserves the
+original casing the value was entered with. If your plugin's target type
+is case-sensitive, this is why it just works — you don't need to do
+anything differently.
+
 ## 11. Where to look for more
 
 - [`SPEC.md`](./SPEC.md) §2.2–2.4, §3.2–3.3 — full architectural

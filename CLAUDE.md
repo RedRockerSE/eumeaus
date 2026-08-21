@@ -37,7 +37,9 @@ before merge.
 - `crates/eumeaus-ip-lookup-plugin` — a third real plugin: geolocates an
   `IPAddress` via ip-api.com, emitting `Location`+`Organization`.
 - `crates/eumeaus-domain-lookup-plugin` — a fourth real plugin: RDAP
-  domain lookup, self-merging onto the target `Domain` instead of only creating new related entities.
+  domain lookup, self-merging onto the target `Domain`.
+- `crates/eumeaus-crypto-wallet-plugin` — a fifth real plugin: a Bitcoin
+  address's Blockstream balance, self-enriching the target.
 - `crates/eumeaus-cli` — thin CLI wrapper over the engine API; also the
   end-to-end test surface (`crates/eumeaus-cli/tests/`), including the v1
   proof (`e2e_v1_proof.rs`, SPEC.md §6).
@@ -91,6 +93,9 @@ before merge.
   the key up), but it's also stored inside the encrypted DB — so a plaintext
   sidecar file `<name>.eum.meta` (just the UUID) sits next to each case file
   to break that chicken-and-egg. It carries no secret.
+- `CheckRequest.input_value` sends the target's `display_label`, not the
+  normalized (lowercased) `canonical_key` — needed so a case-sensitive
+  value (e.g. a Bitcoin address) reaches a plugin uncorrupted.
 
 ## Repo etiquette
 
@@ -101,25 +106,20 @@ before merge.
 
 SPEC.md §7's milestones (M0–M6) are done — v1 CLI complete, released,
 public (`CLI.md` is the full reference); §8.1–8.7 resolved, §8.8 has a
-design (§9). `v0.1.0`–`v0.1.3` tagged/published via `.github/workflows/release.yml` (bundles all four plugins below); `install.sh`/`install.ps1` fetch/verify from there.
+design (§9). `v0.1.0`–`v0.1.3` tagged/published (bundles the shipped
+plugins); `install.sh`/`install.ps1` fetch/verify from there.
 
 GUI (SPEC.md §9): Tauri 2.x, React+TS, Linux+Windows only, `crates/`
 workspace. G0–G6 done; `gui-v0.1.0`–`gui-v0.1.3` tagged/published
-(unsigned — Windows Authenticode deferred). Updater verified live
-end-to-end. UX redesign (claude.ai/design handover, merged) replaced
+(unsigned). UX redesign (claude.ai/design handover, merged) replaced
 G0–G6's flat forms with real sidebar screens (Overview/Entities/Graph/
-Scans/Plugins/Settings), no mock data — see `api.ts`/`entityStyle.ts`.
-Report export + verify (`report_state.rs`) on Overview. `usertests/`'s
-exploratory pass added native pickers, a persisted default plugins dir
-(`settings_state.rs`), a searchable `EntityPicker` combobox, and
-entity-detail "Add fact" (`Case::add_fact_to_entity`, correct for keyless
-entities unlike `add_entity`) — also fixed `entityStyle.ts`'s `"IpAddress"`→`"IPAddress"` mismatch.
+Scans/Plugins/Settings) backed by `api.ts`/`entityStyle.ts`, plus report
+export+verify (`report_state.rs`) and updater, verified live end-to-end.
+`usertests/`'s exploratory pass added native pickers, a persisted default
+plugins dir, a searchable entity combobox, and entity-detail "Add fact"
+— also fixed an `entityStyle.ts` key-casing bug.
 
-Deviations from SPEC.md's illustrative APIs, each documented at the point
-of deviation: `Case::get_entity`/`list_attribute_records`/`find_entity_by_key`/
-`create_scan` (§3.1 gives no signatures); `RelationshipType::Custom` +
-`relationship_attributes` table (§4.2 only lists `entity_attributes`);
-`eumeaus-plugin-host`'s async API, `Case::start_scan`'s `Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions); plugin signing (§3.3 has none).
+Deviations from SPEC.md's illustrative APIs: `Case::get_entity`/`list_attribute_records`/`find_entity_by_key`/`create_scan` (§3.1 gives no signatures); `RelationshipType::Custom` + `relationship_attributes` table (§4.2 only lists `entity_attributes`); `eumeaus-plugin-host`'s async API, `Case::start_scan`'s `Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions); the plugin signature scheme (§3.3 has none).
 
 ## Gotchas
 

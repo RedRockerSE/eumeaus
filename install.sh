@@ -96,12 +96,19 @@ cp "$extracted/plugins/domain-lookup/eumeaus-domain-lookup-plugin" "$domain_plug
 cp "$extracted/plugins/domain-lookup/plugin.toml" "$domain_plugin_dir/"
 chmod +x "$domain_plugin_dir/eumeaus-domain-lookup-plugin"
 
+crypto_wallet_plugin_dir="$install_dir/eumeaus-plugins/crypto-wallet"
+mkdir -p "$crypto_wallet_plugin_dir"
+cp "$extracted/plugins/crypto-wallet/eumeaus-crypto-wallet-plugin" "$crypto_wallet_plugin_dir/"
+cp "$extracted/plugins/crypto-wallet/plugin.toml" "$crypto_wallet_plugin_dir/"
+chmod +x "$crypto_wallet_plugin_dir/eumeaus-crypto-wallet-plugin"
+
 echo
 echo "Installed eumeaus ${version} to $install_dir/eumeaus"
 echo "Installed the bundled username-search plugin to $plugin_dir"
 echo "Installed the bundled email-lookup plugin to $email_plugin_dir"
 echo "Installed the bundled ip-lookup plugin to $ip_plugin_dir"
 echo "Installed the bundled domain-lookup plugin to $domain_plugin_dir"
+echo "Installed the bundled crypto-wallet plugin to $crypto_wallet_plugin_dir"
 
 case ":$PATH:" in
     *":$install_dir:"*) ;;
