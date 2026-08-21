@@ -252,6 +252,73 @@ fn add_entity_impl(
     Ok(EntityId(entity_id))
 }
 
+/// Adds a new fact (and its attributes) directly to an *existing* entity,
+/// identified by id rather than by `(entity_type, canonical_key)` —
+/// unlike [`add_entity`], there's no auto-merge resolution step, because
+/// the caller already knows exactly which entity this belongs to.
+///
+/// This matters for entities added *without* a canonical key
+/// (`add_entity`'s `key: None` path): re-calling `add_entity` with the
+/// same type but no key never auto-merges (SPEC.md §4.4 — there's no key
+/// to match on), so it would silently create a *second*, unrelated
+/// entity instead of adding a fact to the one the caller meant. This
+/// function has no such trap: it always targets the entity_id given,
+/// keyed or not — the GUI's entity-detail "add fact" action (added after
+/// the exploratory test found no correct way to add a fact to an
+/// existing entity) needs exactly this.
+pub(crate) fn add_fact_to_entity(
+    conn: &mut Connection,
+    entity_id: EntityId,
+    attrs: Vec<Attribute>,
+    provenance: Provenance,
+) -> Result<FactId, EngineError> {
+    let now = now_unix_ms();
+    let tx = conn.transaction()?;
+    ensure_entity_exists(&tx, entity_id)?;
+
+    tx.execute(
+        "UPDATE entities SET updated_at = ?1 WHERE id = ?2",
+        params![now, entity_id.0.to_string()],
+    )?;
+
+    let fact_id = Uuid::new_v4();
+    tx.execute(
+        "INSERT INTO facts
+            (id, entity_id, relationship_id, scan_id, source, source_version,
+             confidence_status, source_url, retrieval_method, raw_response_sha256, collected_at)
+         VALUES (?1, ?2, NULL, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            fact_id.to_string(),
+            entity_id.0.to_string(),
+            provenance.source,
+            provenance.source_version,
+            ConfidenceStatus::Found.to_string(),
+            provenance.source_url,
+            provenance.retrieval_method,
+            provenance.raw_response_sha256,
+            provenance.collected_at_unix_ms,
+        ],
+    )?;
+
+    {
+        let mut insert_attr = tx.prepare(
+            "INSERT INTO entity_attributes (id, entity_id, fact_id, key, value) VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for attr in &attrs {
+            insert_attr.execute(params![
+                Uuid::new_v4().to_string(),
+                entity_id.0.to_string(),
+                fact_id.to_string(),
+                attr.key,
+                attr.value,
+            ])?;
+        }
+    }
+
+    tx.commit()?;
+    Ok(FactId(fact_id))
+}
+
 /// Absorbs `b` into `a`: re-points `b`'s facts, attributes, and
 /// relationship endpoints at `a`, deletes `b`'s now-empty entity row, and
 /// records the merge as an `audit_events` row (SPEC.md §4.4) — the
@@ -841,6 +908,77 @@ mod tests {
         assert_eq!(attrs[0].value, "hello");
         assert!(attrs[0].is_current);
         assert!(!attrs[0].conflicting);
+    }
+
+    #[test]
+    fn add_fact_to_entity_adds_a_fact_without_touching_existing_ones() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Username,
+            Some("carol".to_string()),
+            vec![attr("bio", "first")],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let fact_id = add_fact_to_entity(
+            &mut conn,
+            id,
+            vec![attr("location", "here")],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let attrs = list_attribute_records(&conn, id).unwrap();
+        assert_eq!(attrs.len(), 2, "the original fact's attribute must survive");
+        assert!(attrs.iter().any(|a| a.key == "bio" && a.value == "first"));
+        let new_attr = attrs.iter().find(|a| a.key == "location").unwrap();
+        assert_eq!(new_attr.value, "here");
+        assert_eq!(new_attr.fact_id, fact_id);
+    }
+
+    #[test]
+    fn add_fact_to_entity_works_on_a_keyless_entity_without_creating_a_duplicate() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None, // no canonical key — add_entity's auto-merge can never target this
+            vec![attr("alias", "J. Doe")],
+            test_provenance(),
+        )
+        .unwrap();
+
+        add_fact_to_entity(
+            &mut conn,
+            id,
+            vec![attr("note", "seen once")],
+            test_provenance(),
+        )
+        .unwrap();
+
+        // Still exactly one Person entity — a naive "re-call add_entity"
+        // approach would have silently created a second, unrelated one.
+        let all = list_entities(
+            &conn,
+            EntityFilter {
+                entity_type: Some(EntityType::Person),
+            },
+        )
+        .unwrap();
+        assert_eq!(all.len(), 1);
+        let attrs = list_attribute_records(&conn, id).unwrap();
+        assert_eq!(attrs.len(), 2);
+    }
+
+    #[test]
+    fn add_fact_to_entity_errors_on_an_unknown_entity() {
+        let mut conn = test_conn();
+        let bogus = EntityId(Uuid::new_v4());
+
+        let err = add_fact_to_entity(&mut conn, bogus, vec![], test_provenance()).unwrap_err();
+        assert!(matches!(err, EngineError::EntityNotFound(_)));
     }
 
     #[test]

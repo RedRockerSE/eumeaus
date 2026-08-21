@@ -1,7 +1,7 @@
 # Eumeaus
 
 Local-first, plugin-extensible OSINT case management tool. No client-server
-architecture, no GUI in v1 (CLI only). Full design: `SPEC.md`.
+architecture. CLI (v1) + Tauri GUI (v2). Full design: `SPEC.md`.
 
 ## Commands
 
@@ -99,27 +99,27 @@ before merge.
 
 SPEC.md §7's milestones (M0–M6) are done — v1 CLI complete, released,
 public (`CLI.md` is the full reference); §8.1–8.7 resolved, §8.8 has a
-design (§9). `v0.1.0`/`v0.1.1` tagged/published via `.github/workflows/
+design (§9). `v0.1.0`–`v0.1.2` tagged/published via `.github/workflows/
 release.yml` (bundles all three plugins below); `install.sh`/`install.ps1` fetch/verify from there.
 
 GUI (SPEC.md §9): Tauri 2.x, React+TS, Linux+Windows only, `crates/`
 workspace. G0–G6 done; `gui-v0.1.0`/`gui-v0.1.1` tagged/published
 (unsigned — Windows Authenticode deferred). Updater verified live
-end-to-end: a running v0.1.0 instance detected, downloaded, verified,
-installed, relaunched into `gui-v0.1.1`. UX redesign (claude.ai/design
-handover, merged) replaced G0–G6's flat forms: custom titlebar, sidebar
-screens (Overview/Entities/Graph/Scans/Plugins/Settings), all real
-backend commands, no mock data — see `api.ts`/`entityStyle.ts`. Graph:
-real circular layout. Launcher's "recent cases": real directory
-browser. Report export + verify (`report_state.rs`) on Overview.
+end-to-end into `gui-v0.1.1`. UX redesign (claude.ai/design handover,
+merged) replaced G0–G6's flat forms with real sidebar screens
+(Overview/Entities/Graph/Scans/Plugins/Settings), no mock data — see
+`api.ts`/`entityStyle.ts`. Report export + verify (`report_state.rs`)
+on Overview. `usertests/`'s exploratory pass added native pickers (`pickers.ts`), a persisted default plugins dir (`settings_state.rs`),
+a searchable `EntityPicker` combobox, and entity-detail "Add fact"
+(`Case::add_fact_to_entity`, correct for keyless entities unlike
+re-calling `add_entity`) — also fixed `entityStyle.ts`'s `"IpAddress"`→`"IPAddress"` key mismatch.
 
 Deviations from SPEC.md's illustrative APIs, each documented at the point
 of deviation: `Case::get_entity`/`list_attribute_records`/`find_entity_by_key`/
 `create_scan` (§3.1 gives no signatures); `RelationshipType::Custom` +
 `relationship_attributes` table (§4.2 only lists `entity_attributes`);
 `eumeaus-plugin-host`'s async API, `Case::start_scan`'s
-`Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions); the
-plugin signature scheme (§3.3 has none).
+`Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions); the plugin signature scheme (§3.3 has none).
 
 ## Gotchas
 

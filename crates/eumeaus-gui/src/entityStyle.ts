@@ -16,7 +16,13 @@ const TYPE_STYLES: Record<string, TypeStyle> = {
   Email: { abbr: "EM", bg: "rgba(217,161,59,0.14)", fg: "#d9a13b" },
   PhoneNumber: { abbr: "PH", bg: "rgba(200,120,160,0.14)", fg: "#cc85a8" },
   Domain: { abbr: "DO", bg: "rgba(90,160,200,0.14)", fg: "#68a8cc" },
-  IpAddress: { abbr: "IP", bg: "rgba(90,160,200,0.14)", fg: "#5a9fc4" },
+  // "IPAddress", not "IpAddress" — EntityType::IpAddress's Display/FromStr
+  // wire string (eumeaus-engine/src/lib.rs). A mismatched key here doesn't
+  // just mean the wrong badge color: EntityType::from_str is infallible,
+  // so anywhere this string round-trips through entityAdd/scanRun as a
+  // *type* (not just a display lookup), a wrong key would silently create
+  // Custom("IpAddress") instead of the real IpAddress variant.
+  IPAddress: { abbr: "IP", bg: "rgba(90,160,200,0.14)", fg: "#5a9fc4" },
   OnlineAccount: { abbr: "OA", bg: "rgba(111,185,138,0.10)", fg: "#5aa878" },
   Organization: { abbr: "OR", bg: "rgba(150,150,170,0.14)", fg: "#a0a0b4" },
   Location: { abbr: "LO", bg: "rgba(160,140,110,0.14)", fg: "#b39a76" },
@@ -39,3 +45,18 @@ export function styleForEntityType(entityType: string): TypeStyle {
 }
 
 export const ENTITY_TYPES = Object.keys(TYPE_STYLES);
+
+// RelationshipType's starter taxonomy (SPEC.md §4.3/CLI.md's "Entity and
+// relationship types") — Custom(name) is the escape hatch (§4.4), same
+// pattern as ENTITY_TYPES, surfaced in the UI as a free-text "Custom…"
+// option rather than baked into this list.
+export const RELATIONSHIP_TYPES = [
+  "HasAccount",
+  "Owns",
+  "AssociatedWith",
+  "LocatedAt",
+  "MemberOf",
+  "ResolvesTo",
+  "Mentions",
+  "RelatedTo",
+];

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CaseInfo } from "../api";
 import { caseCreate, caseList, caseOpen } from "../api";
+import { pickCaseFile, pickDirectory } from "../pickers";
 
 // The design's right-hand panel shows a static "Recent" case list — no
 // such MRU tracking exists in the backend (Case::list only lists cases
@@ -53,6 +54,21 @@ export default function Launcher({ onOpened }: { onOpened: (c: CaseInfo) => void
     }
   }
 
+  async function browseForOpenPath() {
+    const picked = await pickCaseFile();
+    if (picked) setOpenPath(picked);
+  }
+
+  async function browseForNewDir() {
+    const picked = await pickDirectory();
+    if (picked) setNewDir(picked);
+  }
+
+  async function browseForBrowseDir() {
+    const picked = await pickDirectory();
+    if (picked) setBrowseDir(picked);
+  }
+
   return (
     <div className="launcher">
       <div className="launcher-left">
@@ -77,6 +93,9 @@ export default function Launcher({ onOpened }: { onOpened: (c: CaseInfo) => void
               onChange={(e) => setOpenPath(e.currentTarget.value)}
               placeholder="/home/you/Cases/nightjar.eum"
             />
+            <button type="button" className="btn" onClick={browseForOpenPath}>
+              Browse…
+            </button>
             <button type="submit" className="btn btn-primary">
               Open case
             </button>
@@ -93,6 +112,9 @@ export default function Launcher({ onOpened }: { onOpened: (c: CaseInfo) => void
               onChange={(e) => setNewDir(e.currentTarget.value)}
               placeholder="Directory"
             />
+            <button type="button" className="btn" onClick={browseForNewDir}>
+              Browse…
+            </button>
             <input
               style={{ flex: 1 }}
               value={newName}
@@ -116,6 +138,9 @@ export default function Launcher({ onOpened }: { onOpened: (c: CaseInfo) => void
             onChange={(e) => setBrowseDir(e.currentTarget.value)}
             placeholder="/home/you/Cases"
           />
+          <button type="button" className="btn" onClick={browseForBrowseDir}>
+            Browse…
+          </button>
           <button type="submit" className="btn">
             List
           </button>

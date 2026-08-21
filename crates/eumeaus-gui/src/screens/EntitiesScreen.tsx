@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { AttributeInput, AuditEvent, EntityDetail, EntitySummary, RelationshipDto } from "../api";
 import {
   entityAdd,
+  entityAddFact,
   entityAudit,
   entityList,
   entityMerge,
@@ -10,9 +11,11 @@ import {
   relationshipAdd,
   relationshipList,
 } from "../api";
-import { ENTITY_TYPES, styleForEntityType } from "../entityStyle";
+import { ENTITY_TYPES, RELATIONSHIP_TYPES, styleForEntityType } from "../entityStyle";
+import EntityPicker from "../components/EntityPicker";
 
 type Tab = "facts" | "links" | "history";
+const CUSTOM_REL_TYPE = "__custom__";
 
 export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChanged: () => void }) {
   const [entities, setEntities] = useState<EntitySummary[] | null>(null);
@@ -29,6 +32,10 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
   const [newAttrKey, setNewAttrKey] = useState("");
   const [newAttrValue, setNewAttrValue] = useState("");
 
+  const [addFactOpen, setAddFactOpen] = useState(false);
+  const [newFactKey, setNewFactKey] = useState("");
+  const [newFactValue, setNewFactValue] = useState("");
+
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeOther, setMergeOther] = useState("");
 
@@ -36,8 +43,9 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
   const [splitFactIds, setSplitFactIds] = useState<Set<string>>(new Set());
 
   const [relationships, setRelationships] = useState<RelationshipDto[] | null>(null);
-  const [relTo, setRelTo] = useState("");
-  const [relType, setRelType] = useState("AssociatedWith");
+  const [relToId, setRelToId] = useState("");
+  const [relType, setRelType] = useState(RELATIONSHIP_TYPES[2]); // "AssociatedWith"
+  const [customRelType, setCustomRelType] = useState("");
 
   const [history, setHistory] = useState<AuditEvent[] | null>(null);
 
@@ -86,6 +94,8 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
     setSplitMode(false);
     setSplitFactIds(new Set());
     setMergeOpen(false);
+    setAddFactOpen(false);
+    setRelToId("");
   }
 
   const filtered = (entities ?? []).filter((e) => {
@@ -145,13 +155,31 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
     }
   }
 
-  async function addRelationship(e: React.FormEvent) {
+  async function addFact(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedId) return;
+    if (!selectedId || !newFactKey.trim()) return;
     setError(null);
     try {
-      await relationshipAdd(selectedId, relTo, relType, []);
-      setRelTo("");
+      const detail = await entityAddFact(selectedId, [{ key: newFactKey, value: newFactValue }]);
+      setSelected(detail);
+      setNewFactKey("");
+      setNewFactValue("");
+      setAddFactOpen(false);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function addRelationship(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedId || !relToId) return;
+    setError(null);
+    const effectiveType = relType === CUSTOM_REL_TYPE ? customRelType.trim() : relType;
+    if (!effectiveType) return;
+    try {
+      await relationshipAdd(selectedId, relToId, effectiveType, []);
+      setRelToId("");
+      setCustomRelType("");
       const rels = await relationshipList();
       setRelationships(rels);
     } catch (e) {
@@ -301,6 +329,12 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                   </div>
                 </div>
                 <div className="row" style={{ flex: "none" }}>
+                  <button
+                    className={"btn" + (addFactOpen ? " btn-primary" : "")}
+                    onClick={() => setAddFactOpen((v) => !v)}
+                  >
+                    Add fact…
+                  </button>
                   <button className="btn" onClick={() => setMergeOpen((v) => !v)}>
                     Merge…
                   </button>
@@ -315,6 +349,26 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                   </button>
                 </div>
               </div>
+
+              {addFactOpen && (
+                <form className="row" style={{ marginBottom: 14 }} onSubmit={addFact}>
+                  <input
+                    style={{ width: 160 }}
+                    value={newFactKey}
+                    onChange={(e) => setNewFactKey(e.currentTarget.value)}
+                    placeholder="Attribute"
+                  />
+                  <input
+                    style={{ flex: 1 }}
+                    value={newFactValue}
+                    onChange={(e) => setNewFactValue(e.currentTarget.value)}
+                    placeholder="Value"
+                  />
+                  <button type="submit" className="btn btn-primary">
+                    Add fact
+                  </button>
+                </form>
+              )}
 
               {mergeOpen && (
                 <form className="row" style={{ marginBottom: 14 }} onSubmit={doMerge}>
@@ -422,21 +476,35 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                       </div>
                     );
                   })}
-                  <form className="row" onSubmit={addRelationship}>
-                    <input
-                      className="mono"
-                      style={{ flex: 1 }}
-                      value={relTo}
-                      onChange={(e) => setRelTo(e.currentTarget.value)}
-                      placeholder="Other entity id"
-                    />
-                    <input
-                      style={{ width: 160 }}
-                      value={relType}
-                      onChange={(e) => setRelType(e.currentTarget.value)}
-                      placeholder="Relationship type"
-                    />
-                    <button type="submit" className="btn">
+                  <form className="col" onSubmit={addRelationship}>
+                    <div className="row">
+                      <EntityPicker
+                        entities={entities ?? []}
+                        value={relToId}
+                        onChange={setRelToId}
+                        excludeId={selectedId ?? undefined}
+                        placeholder="Other entity…"
+                      />
+                      <select
+                        style={{ width: 160 }}
+                        value={relType}
+                        onChange={(e) => setRelType(e.currentTarget.value)}
+                      >
+                        {RELATIONSHIP_TYPES.map((t) => (
+                          <option key={t}>{t}</option>
+                        ))}
+                        <option value={CUSTOM_REL_TYPE}>Custom…</option>
+                      </select>
+                    </div>
+                    {relType === CUSTOM_REL_TYPE && (
+                      <input
+                        style={{ maxWidth: 220 }}
+                        value={customRelType}
+                        onChange={(e) => setCustomRelType(e.currentTarget.value)}
+                        placeholder="Custom relationship type"
+                      />
+                    )}
+                    <button type="submit" className="btn" style={{ alignSelf: "flex-start" }}>
                       Add relationship…
                     </button>
                   </form>

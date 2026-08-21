@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PluginSummary } from "../api";
-import { pluginInstall, pluginList, pluginVerify } from "../api";
+import { pluginInstall, pluginList, pluginVerify, settingsGetPluginsDir } from "../api";
+import { pickDirectory } from "../pickers";
 
 export default function PluginsScreen() {
   const [pluginsDir, setPluginsDir] = useState("");
@@ -11,6 +12,17 @@ export default function PluginsScreen() {
   const [verifyTrust, setVerifyTrust] = useState<Record<string, string>>({});
   const [verifyResult, setVerifyResult] = useState<Record<string, string>>({});
 
+  // Exploratory test §4.1: pre-fill from the saved default (Settings ›
+  // General) so this doesn't need re-typing every visit — still fully
+  // editable/overridable per-session, just not empty by default.
+  useEffect(() => {
+    settingsGetPluginsDir()
+      .then((dir) => {
+        if (dir) setPluginsDir(dir);
+      })
+      .catch(() => {});
+  }, []);
+
   async function refresh(e?: React.FormEvent) {
     e?.preventDefault();
     setError(null);
@@ -19,6 +31,16 @@ export default function PluginsScreen() {
     } catch (e) {
       setError(String(e));
     }
+  }
+
+  async function browseForPluginsDir() {
+    const picked = await pickDirectory();
+    if (picked) setPluginsDir(picked);
+  }
+
+  async function browseForSourcePath() {
+    const picked = await pickDirectory();
+    if (picked) setSourcePath(picked);
   }
 
   async function install(e: React.FormEvent) {
@@ -64,6 +86,9 @@ export default function PluginsScreen() {
             onChange={(e) => setPluginsDir(e.currentTarget.value)}
             placeholder="Plugins directory"
           />
+          <button type="button" className="btn" onClick={browseForPluginsDir}>
+            Browse…
+          </button>
           <button className="btn" type="submit">
             List
           </button>
@@ -78,6 +103,9 @@ export default function PluginsScreen() {
               onChange={(e) => setSourcePath(e.currentTarget.value)}
               placeholder="Source directory (contains plugin.toml)"
             />
+            <button type="button" className="btn" onClick={browseForSourcePath}>
+              Browse…
+            </button>
             <button className="btn btn-primary" type="submit">
               Install
             </button>

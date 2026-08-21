@@ -1,19 +1,45 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import type { PluginSummary, ScanProgress, ScanSummary } from "../api";
-import { pluginList, scanList, scanRun } from "../api";
+import type { EntitySummary, PluginSummary, ScanProgress, ScanSummary } from "../api";
+import { entityList, pluginList, scanList, scanRun, settingsGetPluginsDir } from "../api";
+import { pickDirectory } from "../pickers";
+import EntityPicker from "../components/EntityPicker";
+import { ENTITY_TYPES } from "../entityStyle";
 
 export default function ScansScreen() {
   const [pluginsDir, setPluginsDir] = useState("");
   const [plugins, setPlugins] = useState<PluginSummary[] | null>(null);
   const [pluginChecked, setPluginChecked] = useState<Set<string>>(new Set());
   const [targetType, setTargetType] = useState("Username");
-  const [targetValue, setTargetValue] = useState("");
+  const [targetEntities, setTargetEntities] = useState<EntitySummary[]>([]);
+  const [targetEntityId, setTargetEntityId] = useState("");
   const [activeScanId, setActiveScanId] = useState<string | null>(null);
   const [progress, setProgress] = useState<ScanProgress[]>([]);
   const [history, setHistory] = useState<ScanSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const activeScanIdRef = useRef<string | null>(null);
+
+  // Exploratory test §4.1: pre-fill from the saved default so this
+  // doesn't need re-typing every visit.
+  useEffect(() => {
+    settingsGetPluginsDir()
+      .then((dir) => {
+        if (dir) setPluginsDir(dir);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Exploratory test §4.2: the target value must name an *existing*
+  // entity's canonical key (scan_run resolves it that way) — so it's a
+  // selection among real entities of the chosen type, not free text. A
+  // keyless entity has no canonical key at all and can never be a scan
+  // target, so it's excluded here rather than offered and then failing.
+  useEffect(() => {
+    setTargetEntityId("");
+    entityList(targetType)
+      .then((all) => setTargetEntities(all.filter((e) => e.canonical_key !== null)))
+      .catch(() => setTargetEntities([]));
+  }, [targetType]);
 
   useEffect(() => {
     const unlisten = listen<ScanProgress>("scan-progress", (event) => {
@@ -51,6 +77,11 @@ export default function ScansScreen() {
     }
   }
 
+  async function browseForPluginsDir() {
+    const picked = await pickDirectory();
+    if (picked) setPluginsDir(picked);
+  }
+
   function togglePlugin(name: string) {
     setPluginChecked((prev) => {
       const next = new Set(prev);
@@ -64,12 +95,18 @@ export default function ScansScreen() {
     e.preventDefault();
     setError(null);
     setProgress([]);
-    if (!pluginsDir.trim() || !targetType.trim() || !targetValue.trim()) {
-      setError("Plugins directory, target type, and target key are all required.");
+    const targetEntity = targetEntities.find((ent) => ent.id === targetEntityId);
+    if (!pluginsDir.trim() || !targetType.trim() || !targetEntity?.canonical_key) {
+      setError("Plugins directory, target type, and target entity are all required.");
       return;
     }
     try {
-      const scanId = await scanRun(pluginsDir, Array.from(pluginChecked), targetType, targetValue);
+      const scanId = await scanRun(
+        pluginsDir,
+        Array.from(pluginChecked),
+        targetType,
+        targetEntity.canonical_key,
+      );
       activeScanIdRef.current = scanId;
       setActiveScanId(scanId);
     } catch (e) {
@@ -89,12 +126,16 @@ export default function ScansScreen() {
           <label className="field-label-sm">Target</label>
           <div className="row">
             <select style={{ width: 130 }} value={targetType} onChange={(e) => setTargetType(e.currentTarget.value)}>
-              <option>Username</option>
-              <option>Email</option>
-              <option>Domain</option>
-              <option>PhoneNumber</option>
+              {ENTITY_TYPES.map((t) => (
+                <option key={t}>{t}</option>
+              ))}
             </select>
-            <input className="mono" style={{ flex: 1, minWidth: 0 }} value={targetValue} onChange={(e) => setTargetValue(e.currentTarget.value)} />
+            <EntityPicker
+              entities={targetEntities}
+              value={targetEntityId}
+              onChange={setTargetEntityId}
+              placeholder={targetEntities.length === 0 ? "No entities of this type" : "Pick an entity…"}
+            />
           </div>
         </div>
 
@@ -102,6 +143,9 @@ export default function ScansScreen() {
           <label className="field-label-sm">Plugins directory</label>
           <form className="row" onSubmit={loadPlugins}>
             <input className="mono" style={{ flex: 1 }} value={pluginsDir} onChange={(e) => setPluginsDir(e.currentTarget.value)} />
+            <button type="button" className="btn btn-small" onClick={browseForPluginsDir}>
+              Browse…
+            </button>
             <button className="btn btn-small" type="submit">
               List
             </button>

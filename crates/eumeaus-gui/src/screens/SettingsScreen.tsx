@@ -2,9 +2,78 @@ import { useEffect, useState } from "react";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type { TrustedKey } from "../api";
-import { credentialList, credentialRemove, credentialSet, trustAdd, trustList, trustRemove } from "../api";
+import {
+  credentialList,
+  credentialRemove,
+  credentialSet,
+  settingsGetPluginsDir,
+  settingsSetPluginsDir,
+  trustAdd,
+  trustList,
+  trustRemove,
+} from "../api";
+import { pickDirectory } from "../pickers";
 
-type SettingsTab = "creds" | "trust" | "updates";
+type SettingsTab = "general" | "creds" | "trust" | "updates";
+
+function GeneralPane() {
+  const [pluginsDir, setPluginsDir] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    settingsGetPluginsDir()
+      .then((dir) => setPluginsDir(dir ?? ""))
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  async function browse() {
+    const picked = await pickDirectory();
+    if (picked) setPluginsDir(picked);
+  }
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaved(false);
+    try {
+      await settingsSetPluginsDir(pluginsDir);
+      setSaved(true);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  return (
+    <>
+      <h1 style={{ margin: "0 0 6px", fontSize: 20, fontWeight: 600, letterSpacing: "-0.3px" }}>General</h1>
+      <p style={{ margin: "0 0 20px", color: "var(--text-faint)", fontSize: 12.5, lineHeight: 1.6, maxWidth: "62ch" }}>
+        The default plugins directory pre-fills the Scans and Plugins screens, so you don&rsquo;t
+        have to re-type or re-browse it every time. Still fully overridable per-screen.
+      </p>
+      {error && <p className="error-text">{error}</p>}
+      <form className="row" onSubmit={save}>
+        <input
+          className="mono"
+          style={{ flex: 1 }}
+          value={pluginsDir}
+          onChange={(e) => {
+            setPluginsDir(e.currentTarget.value);
+            setSaved(false);
+          }}
+          placeholder="Default plugins directory"
+        />
+        <button type="button" className="btn" onClick={browse}>
+          Browse…
+        </button>
+        <button type="submit" className="btn btn-primary">
+          Save
+        </button>
+      </form>
+      {saved && <p style={{ color: "var(--ok)", fontSize: 12, marginTop: 8 }}>Saved.</p>}
+    </>
+  );
+}
 
 function CredentialsPane() {
   const [names, setNames] = useState<string[] | null>(null);
@@ -238,8 +307,9 @@ function UpdatesPane() {
 }
 
 export default function SettingsScreen() {
-  const [tab, setTab] = useState<SettingsTab>("creds");
+  const [tab, setTab] = useState<SettingsTab>("general");
   const tabs: { k: SettingsTab; label: string }[] = [
+    { k: "general", label: "General" },
     { k: "creds", label: "Credentials" },
     { k: "trust", label: "Trust store" },
     { k: "updates", label: "Updates" },
@@ -260,6 +330,7 @@ export default function SettingsScreen() {
       </div>
       <div style={{ flex: 1, overflow: "auto", padding: "22px 26px" }}>
         <div style={{ maxWidth: 680 }}>
+          {tab === "general" && <GeneralPane />}
           {tab === "creds" && <CredentialsPane />}
           {tab === "trust" && <TrustPane />}
           {tab === "updates" && <UpdatesPane />}

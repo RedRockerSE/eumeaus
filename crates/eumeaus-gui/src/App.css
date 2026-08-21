@@ -600,6 +600,9 @@ input.mono {
   border-color: var(--border-accent-subtle);
   background: var(--bg-input-focus);
 }
+.entity-picker-row:hover {
+  background: var(--bg-input-focus);
+}
 
 /* ---------- Misc utility ---------- */
 

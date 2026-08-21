@@ -25,6 +25,9 @@ tauri-plugin-opener = "2"
 serde.workspace = true
 serde_json.workspace = true
 dirs.workspace = true
+# settings_state.rs's local gui_settings.toml — same crate/pattern
+# eumeaus-plugin-host's trust_store.rs already uses for trusted_keys.toml.
+toml.workspace = true
 # G3's scan-progress channel (scan_state.rs) — tauri itself uses tokio
 # internally, but doesn't re-export it, so this is needed directly to
 # name tokio::sync::mpsc's types.
@@ -38,6 +41,9 @@ ed25519-dalek.workspace = true
 # key — SPEC.md §9.4 calls out that this is deliberate, not an oversight.
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Native OS file/directory pickers (exploratory test §1/§2: path fields
+# shouldn't be type-only).
+tauri-plugin-dialog = "2"
 
 [dev-dependencies]
 tempfile = "3.13.0"

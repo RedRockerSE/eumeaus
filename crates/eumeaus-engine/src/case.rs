@@ -384,6 +384,15 @@ impl Case {
         crud::add_entity(&mut self.conn, entity_type, key, attrs, provenance)
     }
 
+    pub fn add_fact_to_entity(
+        &mut self,
+        entity_id: EntityId,
+        attrs: Vec<Attribute>,
+        provenance: Provenance,
+    ) -> Result<FactId, EngineError> {
+        crud::add_fact_to_entity(&mut self.conn, entity_id, attrs, provenance)
+    }
+
     pub fn merge_entities(
         &mut self,
         a: EntityId,

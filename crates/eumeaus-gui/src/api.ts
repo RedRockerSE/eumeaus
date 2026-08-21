@@ -110,6 +110,8 @@ export const entityMerge = (id1: string, id2: string) =>
   invoke<EntitySummary>("entity_merge", { id1, id2 });
 export const entitySplit = (id: string, factIds: string[]) =>
   invoke<EntitySummary>("entity_split", { id, factIds });
+export const entityAddFact = (id: string, attrs: AttributeInput[]) =>
+  invoke<EntityDetail>("entity_add_fact", { id, attrs });
 export const relationshipAdd = (
   from: string,
   to: string,
@@ -175,6 +177,13 @@ export const reportVerify = (
   trustedKey: string | null,
   trust: string | null,
 ) => invoke<void>("report_verify", { reportPath, sigPath, trustedKey, trust });
+
+// ---- settings_state.rs ----
+
+export const settingsGetPluginsDir = () =>
+  invoke<string | null>("settings_get_plugins_dir");
+export const settingsSetPluginsDir = (dir: string) =>
+  invoke<void>("settings_set_plugins_dir", { dir });
 
 // ---- misc ----
 

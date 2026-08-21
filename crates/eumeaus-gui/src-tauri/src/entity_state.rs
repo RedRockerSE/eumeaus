@@ -180,6 +180,38 @@ fn do_entity_add(
         .map_err(|e| e.to_string())
 }
 
+/// Adds a fact directly to an *existing* entity (SPEC.md §9.3, the
+/// exploratory test's §3.1 finding: `entity_add` only supports "add or
+/// auto-merge by type+key," which silently creates a duplicate for a
+/// keyless entity rather than adding to it — see
+/// `Case::add_fact_to_entity`'s doc comment). Not a CLI command; this is
+/// a GUI-only affordance, same precedent as `case_stats`/`audit_trail_all`.
+fn do_entity_add_fact(
+    cell: &Arc<Mutex<Option<Case>>>,
+    id: &str,
+    attrs: Vec<AttributeInput>,
+) -> Result<EntityDetail, String> {
+    let mut guard = cell.lock().unwrap();
+    let case = guard.as_mut().ok_or(NO_CASE_OPEN)?;
+
+    let entity_id = EntityId(id.parse().map_err(|e| format!("invalid entity id: {e}"))?);
+    let attrs: Vec<Attribute> = attrs.into_iter().map(Attribute::from).collect();
+    case.add_fact_to_entity(entity_id, attrs, manual_provenance())
+        .map_err(|e| e.to_string())?;
+
+    let entity = case.get_entity(entity_id).map_err(|e| e.to_string())?;
+    let attributes = case
+        .list_attribute_records(entity_id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(AttributeRecordDto::from)
+        .collect();
+    Ok(EntityDetail {
+        summary: EntitySummary::from(entity),
+        attributes,
+    })
+}
+
 fn do_entity_merge(
     cell: &Arc<Mutex<Option<Case>>>,
     id1: &str,
@@ -255,6 +287,18 @@ pub async fn entity_add(
 ) -> Result<EntitySummary, String> {
     let cell = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || do_entity_add(&cell, &entity_type, key, attrs))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn entity_add_fact(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    attrs: Vec<AttributeInput>,
+) -> Result<EntityDetail, String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_add_fact(&cell, &id, attrs))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -506,6 +550,52 @@ mod tests {
         let shown = do_entity_show(&cell, &created.id).unwrap();
         assert_eq!(shown.attributes.len(), 1);
         assert_eq!(shown.attributes[0].key, "verified");
+    }
+
+    #[test]
+    fn entity_add_fact_adds_to_a_keyless_entity_without_duplicating_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-add-fact").unwrap();
+        let id = case
+            .add_entity(
+                EntityType::Person,
+                None,
+                vec![Attribute {
+                    key: "name".to_string(),
+                    value: "Alice".to_string(),
+                }],
+                manual_provenance(),
+            )
+            .unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let detail = do_entity_add_fact(
+            &cell,
+            &id.to_string(),
+            vec![AttributeInput {
+                key: "note".to_string(),
+                value: "seen at the office".to_string(),
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(detail.summary.id, id.to_string());
+        assert_eq!(detail.attributes.len(), 2);
+        assert!(detail.attributes.iter().any(|a| a.key == "note"));
+
+        // Still exactly one Person — the bug this replaces would have
+        // silently created a second entity via entity_add's no-key path.
+        let all = do_entity_list(&cell, Some("Person".to_string())).unwrap();
+        assert_eq!(all.len(), 1);
+    }
+
+    #[test]
+    fn entity_add_fact_errors_cleanly_with_no_case_open() {
+        let cell: Arc<Mutex<Option<Case>>> = Arc::new(Mutex::new(None));
+        assert_eq!(
+            do_entity_add_fact(&cell, "00000000-0000-0000-0000-000000000000", vec![]).unwrap_err(),
+            NO_CASE_OPEN
+        );
     }
 
     // SPEC.md §9.6 G4's actual verify bar: a GUI-initiated merge produces

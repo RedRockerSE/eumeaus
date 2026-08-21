@@ -5,18 +5,20 @@ mod overview_state;
 mod plugin_state;
 mod report_state;
 mod scan_state;
+mod settings_state;
 mod trust_state;
 
 use case_state::{case_close, case_create, case_current, case_list, case_open, AppState};
 use credential_state::{credential_list, credential_remove, credential_set};
 use entity_state::{
-    entity_add, entity_audit, entity_list, entity_merge, entity_show, entity_split,
-    relationship_add, relationship_list,
+    entity_add, entity_add_fact, entity_audit, entity_list, entity_merge, entity_show,
+    entity_split, relationship_add, relationship_list,
 };
 use overview_state::{audit_list, case_stats};
 use plugin_state::{plugin_install, plugin_list, plugin_verify};
 use report_state::{case_export, report_verify};
 use scan_state::{scan_list, scan_run};
+use settings_state::{settings_get_plugins_dir, settings_set_plugins_dir};
 use trust_state::{trust_add, trust_list, trust_remove};
 
 // G0 (SPEC.md §9.6): a trivial command that genuinely round-trips into
@@ -49,7 +51,9 @@ fn list_entity_types() -> Vec<String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init());
 
     // G6 (SPEC.md §9.4/§9.6): desktop-only, same as every other Tauri
     // project's own setup — this GUI targets Linux/Windows desktop only
@@ -74,6 +78,7 @@ pub fn run() {
             entity_list,
             entity_show,
             entity_add,
+            entity_add_fact,
             entity_merge,
             entity_split,
             entity_audit,
@@ -94,6 +99,8 @@ pub fn run() {
             trust_add,
             trust_list,
             trust_remove,
+            settings_get_plugins_dir,
+            settings_set_plugins_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
