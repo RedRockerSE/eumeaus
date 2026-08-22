@@ -127,8 +127,12 @@ export const entityAdd = (entityType: string, key: string | null, attrs: Attribu
   invoke<EntitySummary>("entity_add", { entityType, key, attrs });
 export const entityMerge = (id1: string, id2: string) =>
   invoke<EntitySummary>("entity_merge", { id1, id2 });
-export const entitySplit = (id: string, factIds: string[]) =>
-  invoke<EntitySummary>("entity_split", { id, factIds });
+export const entitySplit = (
+  id: string,
+  factIds: string[],
+  entityType: string,
+  key: string | null,
+) => invoke<EntitySummary>("entity_split", { id, factIds, entityType, key });
 export const entityAddFact = (id: string, attrs: AttributeInput[]) =>
   invoke<EntityDetail>("entity_add_fact", { id, attrs });
 export const entityAddImage = (id: string, path: string) =>

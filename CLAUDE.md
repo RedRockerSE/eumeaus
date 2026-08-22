@@ -120,7 +120,7 @@ export+verify (`report_state.rs`) and updater, verified live end-to-end.
 `usertests/`'s exploratory pass added native pickers, a persisted default
 plugins dir, a searchable entity combobox, and entity-detail "Add fact".
 
-Deviations from SPEC.md's illustrative APIs: `Case::get_entity`/`list_attribute_records`/`find_entity_by_key`/`create_scan` (§3.1 gives no signatures); `RelationshipType::Custom` + `relationship_attributes` table (§4.2 only lists `entity_attributes`); `eumeaus-plugin-host`'s async API, `Case::start_scan`'s `Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions); the plugin signature scheme (§3.3 has none).
+Deviations from SPEC.md's illustrative APIs: `Case::get_entity`/`list_attribute_records`/`find_entity_by_key`/`create_scan` (§3.1 gives no signatures); `RelationshipType::Custom` + `relationship_attributes` table (§4.2 only lists `entity_attributes`); `eumeaus-plugin-host`'s async API, `Case::start_scan`'s `Vec<PluginRef>`/`plugins_dir`/`TrustPolicy` params (Conventions); the plugin signature scheme (§3.3 has none); `entity split`'s required `--type` (§3.4 has none — the new entity used to silently inherit the source's type, GitHub issue #2).
 
 ## Gotchas
 

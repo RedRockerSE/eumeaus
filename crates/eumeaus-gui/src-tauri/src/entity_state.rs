@@ -381,6 +381,8 @@ fn do_entity_split(
     cell: &Arc<Mutex<Option<Case>>>,
     id: &str,
     fact_ids: Vec<String>,
+    entity_type: &str,
+    key: Option<String>,
 ) -> Result<EntitySummary, String> {
     let mut guard = cell.lock().unwrap();
     let case = guard.as_mut().ok_or(NO_CASE_OPEN)?;
@@ -394,8 +396,11 @@ fn do_entity_split(
                 .map_err(|e| format!("invalid fact id: {e}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    // EntityType::from_str is infallible (SPEC.md §4.3's Custom escape
+    // hatch) — same handling as do_entity_add's own entity_type.
+    let entity_type: EntityType = entity_type.parse().expect("infallible");
     let new_id = case
-        .split_entity(entity_id, fact_ids, default_actor())
+        .split_entity(entity_id, fact_ids, entity_type, key, default_actor())
         .map_err(|e| e.to_string())?;
     case.get_entity(new_id)
         .map(EntitySummary::from)
@@ -540,11 +545,15 @@ pub async fn entity_split(
     state: tauri::State<'_, AppState>,
     id: String,
     fact_ids: Vec<String>,
+    entity_type: String,
+    key: Option<String>,
 ) -> Result<EntitySummary, String> {
     let cell = state.0.clone();
-    tauri::async_runtime::spawn_blocking(move || do_entity_split(&cell, &id, fact_ids))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        do_entity_split(&cell, &id, fact_ids, &entity_type, key)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1039,9 +1048,17 @@ mod tests {
             .fact_id;
 
         let cell = tmp_cell_with_case(case);
-        let new_entity =
-            do_entity_split(&cell, &id.to_string(), vec![alias_fact_id.to_string()]).unwrap();
+        let new_entity = do_entity_split(
+            &cell,
+            &id.to_string(),
+            vec![alias_fact_id.to_string()],
+            "Username",
+            Some("Bob".to_string()),
+        )
+        .unwrap();
         assert_ne!(new_entity.id, id.to_string());
+        assert_eq!(new_entity.entity_type, "Username");
+        assert_eq!(new_entity.canonical_key.as_deref(), Some("bob"));
 
         let guard = cell.lock().unwrap();
         let case_ref = guard.as_ref().unwrap();
@@ -1126,7 +1143,14 @@ mod tests {
             NO_CASE_OPEN
         );
         assert_eq!(
-            do_entity_split(&cell, "00000000-0000-0000-0000-000000000000", vec![]).unwrap_err(),
+            do_entity_split(
+                &cell,
+                "00000000-0000-0000-0000-000000000000",
+                vec![],
+                "Person",
+                None
+            )
+            .unwrap_err(),
             NO_CASE_OPEN
         );
         assert_eq!(

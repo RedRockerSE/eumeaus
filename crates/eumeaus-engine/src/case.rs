@@ -452,9 +452,11 @@ impl Case {
         &mut self,
         id: EntityId,
         fact_ids: Vec<FactId>,
+        entity_type: EntityType,
+        key: Option<String>,
         actor: Actor,
     ) -> Result<EntityId, EngineError> {
-        crud::split_entity(&mut self.conn, id, fact_ids, actor)
+        crud::split_entity(&mut self.conn, id, fact_ids, entity_type, key, actor)
     }
 
     pub fn redact_fact(
