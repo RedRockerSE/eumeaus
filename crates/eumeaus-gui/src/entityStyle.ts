@@ -60,3 +60,23 @@ export const RELATIONSHIP_TYPES = [
   "Mentions",
   "RelatedTo",
 ];
+
+// Which of the above actually mean something directional from -> to (the
+// Graph screen's arrowheads) versus existing specifically for relationships
+// that aren't one-directional. AssociatedWith/RelatedTo are the "no arrow"
+// escape hatches by design, so they're left out on purpose; Custom(name)
+// isn't in RELATIONSHIP_TYPES at all, so it falls through the Set lookup
+// below to the same no-arrow treatment — an arbitrary user-typed string
+// carries no inferable direction the way "Owns" does.
+const DIRECTIONAL_RELATIONSHIP_TYPES = new Set([
+  "HasAccount",
+  "Owns",
+  "LocatedAt",
+  "MemberOf",
+  "ResolvesTo",
+  "Mentions",
+]);
+
+export function isDirectionalRelationship(relationshipType: string): boolean {
+  return DIRECTIONAL_RELATIONSHIP_TYPES.has(relationshipType);
+}

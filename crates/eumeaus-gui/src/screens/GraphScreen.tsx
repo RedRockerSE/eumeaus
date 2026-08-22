@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { EntitySummary, RelationshipDto } from "../api";
 import { entityList, entityListPositions, entitySetPosition, relationshipList } from "../api";
-import { ENTITY_TYPES, styleForEntityType } from "../entityStyle";
+import { ENTITY_TYPES, isDirectionalRelationship, styleForEntityType } from "../entityStyle";
 
 const ACCENT = "#8b7ce8";
 const W = 900;
 const H = 560;
+const NODE_RADIUS = 20;
+const FOCUS_RADIUS = 26;
 // Below this many SVG user units of pointer movement, a press+release on
 // a node is treated as a click (select/focus) rather than a drag — lets
 // the existing "click a node to focus it" behavior keep working without
@@ -35,6 +37,27 @@ function circleLayout(ids: string[]): Map<string, { x: number; y: number }> {
 }
 
 type Point = { x: number; y: number };
+
+// Pulls a relationship line's endpoints back from each node's center to its
+// outer edge (radius ra/rb — a focused node renders larger, see FOCUS_RADIUS
+// below, so the two ends can differ), so the line stops at the circle's
+// outline instead of running underneath it and the node's own label. Falls
+// back to the untrimmed points if the two nodes sit exactly on top of each
+// other (distance 0) — pathological, but division by zero otherwise.
+function trimToEdges(a: Point, ra: number, b: Point, rb: number) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist === 0) return { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+  const ux = dx / dist;
+  const uy = dy / dist;
+  return {
+    x1: a.x + ux * ra,
+    y1: a.y + uy * ra,
+    x2: b.x - ux * rb,
+    y2: b.y - uy * rb,
+  };
+}
 
 export default function GraphScreen() {
   const [entities, setEntities] = useState<EntitySummary[] | null>(null);
@@ -204,6 +227,19 @@ export default function GraphScreen() {
             preserveAspectRatio="xMidYMid meet"
             style={{ width: "100%", height: "100%", display: "block" }}
           >
+            <defs>
+              {/* refX=10 (the triangle's own tip) lands right on the line's
+                  trimmed endpoint, which trimToEdges already placed at the
+                  target node's outline — so the arrow points at, but never
+                  overlaps, the circle. One marker per line color so it
+                  matches whether the line itself is dimmed. */}
+              <marker id="graph-arrow-touch" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+                <path d="M0,0 L10,5 L0,10 z" fill="#6fb98a" />
+              </marker>
+              <marker id="graph-arrow-dim" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+                <path d="M0,0 L10,5 L0,10 z" fill="#3a3a46" />
+              </marker>
+            </defs>
             <rect x={0} y={0} width={W} height={H} fill="transparent" onClick={() => setFocusId(null)} />
             <g
               ref={zoomGroupRef}
@@ -217,16 +253,24 @@ export default function GraphScreen() {
                 const ea = byId.get(r.from);
                 const eb = byId.get(r.to);
                 const visible = ea && eb && typeOn(ea) && typeOn(eb);
+                const ra = r.from === focusId ? FOCUS_RADIUS : NODE_RADIUS;
+                const rb = r.to === focusId ? FOCUS_RADIUS : NODE_RADIUS;
+                const { x1, y1, x2, y2 } = trimToEdges(a, ra, b, rb);
                 return (
                   <g key={r.id}>
                     <line
-                      x1={a.x}
-                      y1={a.y}
-                      x2={b.x}
-                      y2={b.y}
+                      x1={x1}
+                      y1={y1}
+                      x2={x2}
+                      y2={y2}
                       stroke={touches ? "#6fb98a" : "#3a3a46"}
                       strokeWidth={touches ? 1.8 : 1.2}
                       opacity={!visible ? 0.1 : touches ? 0.85 : 0.32}
+                      markerEnd={
+                        isDirectionalRelationship(r.relationship_type)
+                          ? `url(#graph-arrow-${touches ? "touch" : "dim"})`
+                          : undefined
+                      }
                     />
                     <text
                       x={(a.x + b.x) / 2}
@@ -248,7 +292,7 @@ export default function GraphScreen() {
                 const st = styleForEntityType(e.entity_type);
                 const isFocus = e.id === focusId;
                 const dim = !typeOn(e) ? 0.18 : !focusId || isFocus || neighbourIds.includes(e.id) ? 1 : 0.3;
-                const r = isFocus ? 26 : 20;
+                const r = isFocus ? FOCUS_RADIUS : NODE_RADIUS;
                 return (
                   <g
                     key={e.id}
