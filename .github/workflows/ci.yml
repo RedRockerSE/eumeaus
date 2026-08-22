@@ -17,6 +17,16 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # --workspace pulls in eumeaus-gui's src-tauri crate, which won't even
+      # cargo check on Linux without these system dev headers first (see
+      # CLAUDE.md's own Gotchas section) — libwebkit2gtk-4.1-dev pulls in
+      # most of the rest via apt, but not all, so they're listed explicitly.
+      - name: Install Tauri Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -28,6 +38,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # Same as lint's own step above — cargo test --workspace builds
+      # eumeaus-gui's src-tauri crate too.
+      - name: Install Tauri Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev
       # Case files are encrypted with a key stored in the OS keychain
       # (Secret Service on Linux); ubuntu-latest has a D-Bus session but no
       # keyring daemon by default, so tests touching Case::create/open need
@@ -35,7 +53,6 @@ jobs:
       # just has to be supplied once to create+unlock a fresh keyring.
       - name: Start gnome-keyring for OS-credential-store-backed tests
         run: |
-          sudo apt-get update
           sudo apt-get install -y gnome-keyring
           gnome-keyring-daemon --components=secrets --daemonize --unlock <<< 'ci-unlock'
       - name: cargo test
