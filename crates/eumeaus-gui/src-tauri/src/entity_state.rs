@@ -22,8 +22,8 @@ use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use eumeaus_engine::{
-    Actor, Attribute, Case, EntityFilter, EntityId, EntityType, FactId, ImageId, Provenance,
-    Relationship, RelationshipType,
+    Actor, Attribute, Case, EntityFilter, EntityId, EntityPosition, EntityType, FactId, ImageId,
+    Provenance, Relationship, RelationshipType,
 };
 use serde::{Deserialize, Serialize};
 
@@ -402,6 +402,33 @@ fn do_entity_split(
         .map_err(|e| e.to_string())
 }
 
+/// Persists the Graph screen's drag-to-reposition (SPEC.md §9.3) —
+/// `Case::set_entity_position`'s GUI-only affordance, same precedent as
+/// `entity_add_fact`/`entity_add_image`. No CLI equivalent; view state, not
+/// case data a `eumeaus entity` command would ever need to touch.
+fn do_entity_set_position(
+    cell: &Arc<Mutex<Option<Case>>>,
+    id: &str,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let mut guard = cell.lock().unwrap();
+    let case = guard.as_mut().ok_or(NO_CASE_OPEN)?;
+    let entity_id = EntityId(id.parse().map_err(|e| format!("invalid entity id: {e}"))?);
+    case.set_entity_position(entity_id, x, y)
+        .map_err(|e| e.to_string())
+}
+
+fn do_entity_list_positions(
+    cell: &Arc<Mutex<Option<Case>>>,
+) -> Result<Vec<EntityPositionDto>, String> {
+    let guard = cell.lock().unwrap();
+    let case = guard.as_ref().ok_or(NO_CASE_OPEN)?;
+    case.list_entity_positions()
+        .map(|ps| ps.into_iter().map(EntityPositionDto::from).collect())
+        .map_err(|e| e.to_string())
+}
+
 fn do_relationship_add(
     cell: &Arc<Mutex<Option<Case>>>,
     from: &str,
@@ -521,6 +548,29 @@ pub async fn entity_split(
 }
 
 #[tauri::command]
+pub async fn entity_set_position(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    x: f64,
+    y: f64,
+) -> Result<(), String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_set_position(&cell, &id, x, y))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn entity_list_positions(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<EntityPositionDto>, String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_list_positions(&cell))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn relationship_add(
     state: tauri::State<'_, AppState>,
     from: String,
@@ -534,6 +584,23 @@ pub async fn relationship_add(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize, Debug)]
+pub struct EntityPositionDto {
+    pub entity_id: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+impl From<EntityPosition> for EntityPositionDto {
+    fn from(p: EntityPosition) -> Self {
+        EntityPositionDto {
+            entity_id: p.entity_id.to_string(),
+            x: p.x,
+            y: p.y,
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -984,6 +1051,35 @@ mod tests {
         assert_eq!(original_events.len(), 1);
         assert_eq!(original_events[0].event_type, "split");
         assert_eq!(original_events[0].actor, "user");
+    }
+
+    #[test]
+    fn entity_set_position_round_trips_through_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-position-roundtrip").unwrap();
+        let id = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        do_entity_set_position(&cell, &id.to_string(), 12.5, -3.0).unwrap();
+
+        let listed = do_entity_list_positions(&cell).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].entity_id, id.to_string());
+        assert_eq!(listed[0].x, 12.5);
+        assert_eq!(listed[0].y, -3.0);
+    }
+
+    #[test]
+    fn entity_set_position_errors_cleanly_with_no_case_open() {
+        let cell: Arc<Mutex<Option<Case>>> = Arc::new(Mutex::new(None));
+        assert_eq!(
+            do_entity_set_position(&cell, "00000000-0000-0000-0000-000000000000", 0.0, 0.0)
+                .unwrap_err(),
+            NO_CASE_OPEN
+        );
+        assert_eq!(do_entity_list_positions(&cell).unwrap_err(), NO_CASE_OPEN);
     }
 
     #[test]

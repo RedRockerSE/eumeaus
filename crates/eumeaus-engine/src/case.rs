@@ -18,8 +18,8 @@ use uuid::Uuid;
 use crate::{
     crud, keystore, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, CaseStats,
     CaseSummary, EngineError, Entity, EntityFilter, EntityId, EntityImageData, EntityImageSummary,
-    EntityType, FactId, ImageId, PluginRef, Provenance, Relationship, RelationshipId,
-    RelationshipType, ScanConfig, ScanId, ScanStatus, ScanSummary, TargetEntity,
+    EntityPosition, EntityType, FactId, ImageId, PluginRef, Provenance, Relationship,
+    RelationshipId, RelationshipType, ScanConfig, ScanId, ScanStatus, ScanSummary, TargetEntity,
 };
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
@@ -424,6 +424,19 @@ impl Case {
 
     pub fn get_entity_image(&self, image_id: ImageId) -> Result<EntityImageData, EngineError> {
         crud::get_entity_image(&self.conn, image_id)
+    }
+
+    pub fn set_entity_position(
+        &mut self,
+        entity_id: EntityId,
+        x: f64,
+        y: f64,
+    ) -> Result<(), EngineError> {
+        crud::set_entity_position(&self.conn, entity_id, x, y)
+    }
+
+    pub fn list_entity_positions(&self) -> Result<Vec<EntityPosition>, EngineError> {
+        crud::list_entity_positions(&self.conn)
     }
 
     pub fn merge_entities(

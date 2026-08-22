@@ -363,6 +363,17 @@ pub struct EntityImageData {
     pub data: Vec<u8>,
 }
 
+/// A user-dragged position for one entity in the GUI's Link graph screen
+/// (SPEC.md §9.3's graph view). Purely a rendering convenience — entities
+/// with no row here just fall back to the GUI's own circle layout; there's
+/// no requirement that every entity have one.
+#[derive(Debug, Clone, Copy)]
+pub struct EntityPosition {
+    pub entity_id: EntityId,
+    pub x: f64,
+    pub y: f64,
+}
+
 #[derive(Debug, Clone)]
 pub struct Relationship {
     pub id: RelationshipId,

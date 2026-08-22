@@ -25,3 +25,14 @@ CREATE TABLE IF NOT EXISTS entity_images (
 
 CREATE INDEX IF NOT EXISTS entity_images_entity_id_idx
     ON entity_images (entity_id);
+
+-- Persists the Link graph's drag-to-reposition (SPEC.md §9.3): one row per
+-- entity the user has actually dragged, entity_id itself as the PK since
+-- there is at most one current position per entity (no history/provenance
+-- needed — this is view state, not case data). An entity with no row here
+-- just hasn't been dragged yet; the GUI's own circle layout fills the gap.
+CREATE TABLE IF NOT EXISTS entity_positions (
+    entity_id TEXT PRIMARY KEY REFERENCES entities (id),
+    x REAL NOT NULL,
+    y REAL NOT NULL
+);
