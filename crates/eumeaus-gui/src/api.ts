@@ -51,6 +51,12 @@ export interface AttributeInput {
   value: string;
 }
 
+export interface EntityPosition {
+  entity_id: string;
+  x: number;
+  y: number;
+}
+
 export interface RelationshipDto {
   id: string;
   from: string;
@@ -140,6 +146,9 @@ export const relationshipAdd = (
   attrs: AttributeInput[],
 ) => invoke<string>("relationship_add", { from, to, relType, attrs });
 export const relationshipList = () => invoke<RelationshipDto[]>("relationship_list");
+export const entitySetPosition = (id: string, x: number, y: number) =>
+  invoke<void>("entity_set_position", { id, x, y });
+export const entityListPositions = () => invoke<EntityPosition[]>("entity_list_positions");
 export const entityAudit = (id: string) => invoke<AuditEvent[]>("entity_audit", { id });
 
 // ---- overview_state.rs ----

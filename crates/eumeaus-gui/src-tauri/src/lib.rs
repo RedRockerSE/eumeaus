@@ -12,8 +12,8 @@ use case_state::{case_close, case_create, case_current, case_list, case_open, Ap
 use credential_state::{credential_list, credential_remove, credential_set};
 use entity_state::{
     entity_add, entity_add_fact, entity_add_image, entity_audit, entity_get_image, entity_list,
-    entity_list_images, entity_merge, entity_show, entity_split, fact_redact, relationship_add,
-    relationship_list,
+    entity_list_images, entity_list_positions, entity_merge, entity_set_position, entity_show,
+    entity_split, fact_redact, relationship_add, relationship_list,
 };
 use overview_state::{audit_list, case_stats};
 use plugin_state::{plugin_install, plugin_list, plugin_verify};
@@ -87,6 +87,8 @@ pub fn run() {
             entity_merge,
             entity_split,
             entity_audit,
+            entity_set_position,
+            entity_list_positions,
             relationship_add,
             relationship_list,
             case_stats,

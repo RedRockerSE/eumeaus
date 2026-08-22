@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { EntitySummary, RelationshipDto } from "../api";
-import { entityList, relationshipList } from "../api";
+import { entityList, entityListPositions, entitySetPosition, relationshipList } from "../api";
 import { ENTITY_TYPES, styleForEntityType } from "../entityStyle";
 
 const ACCENT = "#8b7ce8";
@@ -19,9 +19,9 @@ const DRAG_THRESHOLD = 4;
 // and good enough for the entity counts this tool is meant for without
 // a physics-simulation dependency this project doesn't have. Nodes are
 // then draggable (see `positions` state below) to reposition from there;
-// this proof of concept keeps dragged positions in memory only — they
-// reset the next time the Graph screen mounts. Persisting them is a
-// separate, later step.
+// a drag persists via `entitySetPosition` (`entity_positions` table), so
+// it survives the Graph screen remounting — this only seeds entities that
+// have never been dragged (or are brand new).
 function circleLayout(ids: string[]): Map<string, { x: number; y: number }> {
   const cx = W / 2;
   const cy = H / 2;
@@ -47,15 +47,21 @@ export default function GraphScreen() {
   const [positions, setPositions] = useState<Map<string, Point>>(new Map());
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomGroupRef = useRef<SVGGElement>(null);
-  const dragRef = useRef<{ id: string; offsetX: number; offsetY: number; moved: boolean } | null>(
-    null,
-  );
+  const dragRef = useRef<{
+    id: string;
+    offsetX: number;
+    offsetY: number;
+    moved: boolean;
+    lastX: number;
+    lastY: number;
+  } | null>(null);
 
   useEffect(() => {
-    Promise.all([entityList(null), relationshipList()])
-      .then(([e, r]) => {
+    Promise.all([entityList(null), relationshipList(), entityListPositions()])
+      .then(([e, r, pos]) => {
         setEntities(e);
         setRelationships(r);
+        setPositions(new Map(pos.map((p) => [p.entity_id, { x: p.x, y: p.y }])));
       })
       .catch((e) => setError(String(e)));
   }, []);
@@ -100,7 +106,14 @@ export default function GraphScreen() {
     const local = localPoint(e);
     if (!p || !local) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { id, offsetX: p.x - local.x, offsetY: p.y - local.y, moved: false };
+    dragRef.current = {
+      id,
+      offsetX: p.x - local.x,
+      offsetY: p.y - local.y,
+      moved: false,
+      lastX: p.x,
+      lastY: p.y,
+    };
   }
 
   function handleNodePointerMove(e: React.PointerEvent<SVGGElement>) {
@@ -115,6 +128,8 @@ export default function GraphScreen() {
       if (p && Math.hypot(nx - p.x, ny - p.y) >= DRAG_THRESHOLD) drag.moved = true;
     }
     if (drag.moved) {
+      drag.lastX = nx;
+      drag.lastY = ny;
       setPositions((prev) => {
         const next = new Map(prev);
         next.set(drag.id, { x: nx, y: ny });
@@ -123,11 +138,18 @@ export default function GraphScreen() {
     }
   }
 
+  // Persists only on release, not on every pointermove — a drag is one
+  // Tauri call, not a stream of them.
   function handleNodePointerUp(e: React.PointerEvent<SVGGElement>, id: string) {
     e.currentTarget.releasePointerCapture(e.pointerId);
     const drag = dragRef.current;
     dragRef.current = null;
-    if (drag && !drag.moved) setFocusId(id);
+    if (!drag) return;
+    if (!drag.moved) {
+      setFocusId(id);
+      return;
+    }
+    entitySetPosition(drag.id, drag.lastX, drag.lastY).catch((err) => setError(String(err)));
   }
 
   const adjacency = useMemo(() => {

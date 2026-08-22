@@ -14,8 +14,9 @@ use uuid::Uuid;
 
 use crate::{
     now_unix_ms, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, ConfidenceStatus,
-    EngineError, Entity, EntityFilter, EntityId, EntityImageData, EntityImageSummary, EntityType,
-    FactId, ImageId, Provenance, Relationship, RelationshipId, RelationshipType,
+    EngineError, Entity, EntityFilter, EntityId, EntityImageData, EntityImageSummary,
+    EntityPosition, EntityType, FactId, ImageId, Provenance, Relationship, RelationshipId,
+    RelationshipType,
 };
 
 fn normalize_key(raw: &str) -> String {
@@ -430,6 +431,46 @@ pub(crate) fn get_entity_image(
     .ok_or(EngineError::ImageNotFound(image_id))
 }
 
+/// Upserts the dragged position for one entity in the Link graph. `x`/`y`
+/// are opaque SVG user-space coordinates as the GUI defines them — the
+/// engine doesn't interpret them, just stores the last one it was given.
+pub(crate) fn set_entity_position(
+    conn: &Connection,
+    entity_id: EntityId,
+    x: f64,
+    y: f64,
+) -> Result<(), EngineError> {
+    ensure_entity_exists(conn, entity_id)?;
+    conn.execute(
+        "INSERT INTO entity_positions (entity_id, x, y) VALUES (?1, ?2, ?3)
+         ON CONFLICT (entity_id) DO UPDATE SET x = excluded.x, y = excluded.y",
+        params![entity_id.0.to_string(), x, y],
+    )?;
+    Ok(())
+}
+
+/// Every entity that currently has a dragged position — the GUI loads this
+/// once on the Graph screen mounting and falls back to its own circle
+/// layout for any entity id not present in the result.
+pub(crate) fn list_entity_positions(conn: &Connection) -> Result<Vec<EntityPosition>, EngineError> {
+    let mut stmt = conn.prepare("SELECT entity_id, x, y FROM entity_positions")?;
+    let rows = stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let x: f64 = row.get(1)?;
+        let y: f64 = row.get(2)?;
+        Ok((id, x, y))
+    })?;
+    rows.map(|r| {
+        let (id, x, y) = r?;
+        Ok(EntityPosition {
+            entity_id: EntityId(Uuid::parse_str(&id).expect("stored entity id is a valid uuid")),
+            x,
+            y,
+        })
+    })
+    .collect()
+}
+
 /// Absorbs `b` into `a`: re-points `b`'s facts, attributes, and
 /// relationship endpoints at `a`, deletes `b`'s now-empty entity row, and
 /// records the merge as an `audit_events` row (SPEC.md §4.4) — the
@@ -465,6 +506,14 @@ pub(crate) fn merge_entities(
     tx.execute(
         "UPDATE relationships SET to_entity_id = ?1 WHERE to_entity_id = ?2",
         params![a_str, b_str],
+    )?;
+    // Must run before the entities delete below — foreign_keys=ON (Case::open)
+    // would otherwise reject deleting a row entity_positions still references.
+    // `a` keeps its own row (if any) untouched; `b`'s would otherwise be an
+    // orphan referencing a now-deleted entity.
+    tx.execute(
+        "DELETE FROM entity_positions WHERE entity_id = ?1",
+        params![b_str],
     )?;
     tx.execute("DELETE FROM entities WHERE id = ?1", params![b_str])?;
 
@@ -1302,6 +1351,98 @@ mod tests {
         )
         .unwrap();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn set_entity_position_upserts_and_list_returns_it() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        set_entity_position(&conn, id, 1.5, 2.5).unwrap();
+        let positions = list_entity_positions(&conn).unwrap();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].entity_id, id);
+        assert_eq!(positions[0].x, 1.5);
+        assert_eq!(positions[0].y, 2.5);
+
+        // Dragging again updates the same row rather than adding a second one.
+        set_entity_position(&conn, id, 9.0, 9.0).unwrap();
+        let positions = list_entity_positions(&conn).unwrap();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].x, 9.0);
+        assert_eq!(positions[0].y, 9.0);
+    }
+
+    #[test]
+    fn set_entity_position_errors_on_missing_entity() {
+        let conn = test_conn();
+        let bogus = EntityId(Uuid::new_v4());
+        assert!(matches!(
+            set_entity_position(&conn, bogus, 0.0, 0.0).unwrap_err(),
+            EngineError::EntityNotFound(_)
+        ));
+    }
+
+    #[test]
+    fn list_entity_positions_omits_entities_that_were_never_dragged() {
+        let mut conn = test_conn();
+        let dragged = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let _untouched = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        set_entity_position(&conn, dragged, 3.0, 4.0).unwrap();
+
+        let positions = list_entity_positions(&conn).unwrap();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].entity_id, dragged);
+    }
+
+    #[test]
+    fn merge_entities_drops_the_losers_dragged_position() {
+        let mut conn = test_conn();
+        let a = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let b = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        set_entity_position(&conn, b, 5.0, 6.0).unwrap();
+
+        // Would fail under foreign_keys=ON if the loser's entity_positions
+        // row weren't cleared before its entities row is deleted.
+        merge_entities(&mut conn, a, b, actor()).unwrap();
+
+        let positions = list_entity_positions(&conn).unwrap();
+        assert!(positions.is_empty());
     }
 
     #[test]
