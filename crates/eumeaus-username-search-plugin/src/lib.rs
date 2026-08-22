@@ -36,12 +36,15 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use eumeaus_plugin_protocol::{
     CheckRequest, CheckResult, ConfidenceStatus, EntityFinding, Provenance, RelationshipFinding,
 };
 use serde::Deserialize;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Site {
@@ -344,6 +347,13 @@ pub async fn check_site(
     }
 }
 
+// How many site checks `check()` runs at once. High enough that a large
+// custom sites.toml (hundreds of sites) finishes comfortably inside
+// plugin.toml's default_timeout_ms; low enough to stay a single polite
+// client rather than something that reads as a mini-DDoS against dozens
+// of real third-party sites simultaneously.
+const MAX_CONCURRENT_CHECKS: usize = 20;
+
 pub struct UsernameSearch {
     client: reqwest::Client,
     base_override: Option<String>,
@@ -379,19 +389,39 @@ impl eumeaus_plugin_sdk::PluginRuntime for UsernameSearch {
     }
 
     async fn check(&self, request: &CheckRequest) -> Vec<CheckResult> {
-        // Sequential, not concurrent: the site list is small, and keeping
-        // this simple matters more than shaving a few hundred ms off a PoC.
+        // Bounded-concurrent, not sequential or fully parallel: a
+        // sites.toml can realistically list hundreds of sites (e.g. a
+        // Sherlock-equivalent list), so checking them one at a time would
+        // blow the plugin-host's whole-call timeout (plugin.toml's
+        // default_timeout_ms) long before finishing — but firing every
+        // request at once would hammer dozens of real third-party sites
+        // simultaneously from one machine. MAX_CONCURRENT_CHECKS caps how
+        // many requests are in flight at a time; results.len() always
+        // equals self.sites.len() regardless of completion order.
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CHECKS));
+        let mut set = JoinSet::new();
+        // clippy sees `check_site` only ever borrowing `site` and suggests
+        // dropping this .cloned() — but the owned Site has to move into the
+        // spawned task below, which JoinSet::spawn requires to be 'static;
+        // a `&Site` borrowed from `self.sites` doesn't satisfy that.
+        #[allow(clippy::unnecessary_to_owned)]
+        for site in self.sites.iter().cloned() {
+            let semaphore = Arc::clone(&semaphore);
+            let client = self.client.clone();
+            let username = request.input_value.clone();
+            let base_override = self.base_override.clone();
+            set.spawn(async move {
+                let _permit = semaphore
+                    .acquire_owned()
+                    .await
+                    .expect("semaphore is never closed");
+                check_site(&client, &site, &username, base_override.as_deref()).await
+            });
+        }
+
         let mut results = Vec::with_capacity(self.sites.len());
-        for site in &self.sites {
-            results.push(
-                check_site(
-                    &self.client,
-                    site,
-                    &request.input_value,
-                    self.base_override.as_deref(),
-                )
-                .await,
-            );
+        while let Some(joined) = set.join_next().await {
+            results.push(joined.expect("check_site task panicked"));
         }
         results
     }
@@ -400,7 +430,52 @@ impl eumeaus_plugin_sdk::PluginRuntime for UsernameSearch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eumeaus_plugin_sdk::PluginRuntime;
     use std::sync::Mutex;
+
+    // The bug this guards against: with a 400+ site sites.toml (a
+    // Sherlock-equivalent list), the old sequential check() blew the
+    // plugin-host's whole-call timeout long before finishing. This proves
+    // check() handles a site count well past MAX_CONCURRENT_CHECKS and
+    // still returns exactly one result per site, regardless of the
+    // semaphore forcing them through in batches.
+    #[tokio::test]
+    async fn check_handles_more_sites_than_the_concurrency_cap() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&server)
+            .await;
+
+        let sites: Vec<Site> = (0..MAX_CONCURRENT_CHECKS * 2 + 1)
+            .map(|i| Site {
+                slug: format!("site-{i}"),
+                display_name: format!("Site {i}"),
+                base_url: "https://example.invalid".to_string(),
+                path_template: "/{username}".to_string(),
+                detection: Detection::StatusCode,
+            })
+            .collect();
+        let expected = sites.len();
+
+        let search = UsernameSearch {
+            client: reqwest::Client::new(),
+            base_override: Some(server.uri()),
+            sites,
+        };
+
+        let results = search
+            .check(&CheckRequest {
+                input_value: "carol".to_string(),
+                ..Default::default()
+            })
+            .await;
+
+        assert_eq!(results.len(), expected);
+        assert!(results
+            .iter()
+            .all(|r| r.status == ConfidenceStatus::Found as i32));
+    }
 
     /// `load_sites()`'s env-var-driven tests below mutate process-global
     /// state (`std::env::set_var`/`remove_var`), which races across

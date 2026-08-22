@@ -1,0 +1,3140 @@
+# Converted from the Sherlock project's data.json (https://github.com/sherlock-project/sherlock/blob/master/sherlock_project/resources/data.json).
+#
+# NOT wired into any build — a plain reference resource, not consumed by eumeaus-username-search-plugin or any CI step. To actually use it, copy/rename it to sites.toml next to that plugin's plugin.toml, or point EUMEAUS_USERNAME_SEARCH_SITES_FILE at it.
+#
+# Sherlock's data.json is a strictly richer format than this plugin's Detection enum (StatusCode / BodyMarkerMeansNotFound(marker)) supports, so this is a lossy, best-effort conversion:
+#  - 27 sites skipped entirely: errorType "response_url" (redirect-target-based detection) has no equivalent here.
+#  - 22 sites skipped entirely: the {} placeholder sits in the subdomain (e.g. https://{}.example.com), and path_template can only substitute within the path, not the host.
+#  - 3 sites skipped entirely: no substitutable path found.
+#  - 0 sites skipped entirely: errorType "message" with no usable errorMsg string.
+#  - Every kept "message"-detection site with an errorMsg *array* (multiple alternative not-found markers, e.g. rate-limit vs. genuinely-not-found) keeps only the first string — not_found_marker takes exactly one.
+#  - Sherlock's regexCheck (username format pre-validation), request_method/ request_payload (POST probes), custom headers, urlProbe (a separate check URL from the display URL), isNSFW, and a site-specific errorCode other than 404 (e.g. Sherlock's own "Slides" entry expects 204) all have no equivalent and are silently dropped — every kept site here is checked with a plain GET against base_url + path_template.
+#
+# 429 sites converted; see the counts above for what didn't make it.
+
+[[sites]]
+slug = "1337x"
+display_name = "1337x"
+base_url = "https://www.1337x.to"
+path_template = "/user/{username}/"
+detection = "body_marker"
+not_found_marker = "<title>Error something went wrong.</title>"
+
+[[sites]]
+slug = "2dimensions"
+display_name = "2Dimensions"
+base_url = "https://2Dimensions.com"
+path_template = "/a/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "7cups"
+display_name = "7Cups"
+base_url = "https://www.7cups.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "9gag"
+display_name = "9GAG"
+base_url = "https://www.9gag.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "apclips"
+display_name = "APClips"
+base_url = "https://apclips.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Amateur Porn Content Creators"
+
+[[sites]]
+slug = "about-me"
+display_name = "About.me"
+base_url = "https://about.me"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "academia-edu"
+display_name = "Academia.edu"
+base_url = "https://independent.academia.edu"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "admireme-vip"
+display_name = "AdmireMe.Vip"
+base_url = "https://admireme.vip"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Page Not Found"
+
+[[sites]]
+slug = "airbit"
+display_name = "Airbit"
+base_url = "https://airbit.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "airliners"
+display_name = "Airliners"
+base_url = "https://www.airliners.net"
+path_template = "/user/{username}/profile/photos"
+detection = "status_code"
+
+[[sites]]
+slug = "all-things-worn"
+display_name = "All Things Worn"
+base_url = "https://www.allthingsworn.com"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "Sell Used Panties"
+
+[[sites]]
+slug = "allmylinks"
+display_name = "AllMyLinks"
+base_url = "https://allmylinks.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Page not found"
+
+[[sites]]
+slug = "aniworld"
+display_name = "AniWorld"
+base_url = "https://aniworld.to"
+path_template = "/user/profil/{username}"
+detection = "body_marker"
+not_found_marker = "Dieses Profil ist nicht verfügbar"
+
+[[sites]]
+slug = "anilist"
+display_name = "Anilist"
+base_url = "https://anilist.co"
+path_template = "/user/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "apple-developer"
+display_name = "Apple Developer"
+base_url = "https://developer.apple.com"
+path_template = "/forums/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "apple-discussions"
+display_name = "Apple Discussions"
+base_url = "https://discussions.apple.com"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "Looking for something in Apple Support Communities?"
+
+[[sites]]
+slug = "aparat"
+display_name = "Aparat"
+base_url = "https://www.aparat.com"
+path_template = "/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "archive-of-our-own"
+display_name = "Archive of Our Own"
+base_url = "https://archiveofourown.org"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "archive-org"
+display_name = "Archive.org"
+base_url = "https://archive.org"
+path_template = "/details/@{username}"
+detection = "body_marker"
+not_found_marker = "could not fetch an account with user item identifier"
+
+[[sites]]
+slug = "arduino-forum"
+display_name = "Arduino Forum"
+base_url = "https://forum.arduino.cc"
+path_template = "/u/{username}/summary"
+detection = "status_code"
+
+[[sites]]
+slug = "artstation"
+display_name = "ArtStation"
+base_url = "https://www.artstation.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "asciinema"
+display_name = "Asciinema"
+base_url = "https://asciinema.org"
+path_template = "/~{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "ask-fedora"
+display_name = "Ask Fedora"
+base_url = "https://ask.fedoraproject.org"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "atcoder"
+display_name = "Atcoder"
+base_url = "https://atcoder.jp"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "vjudge"
+display_name = "Vjudge"
+base_url = "https://VJudge.net"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "audiojungle"
+display_name = "Audiojungle"
+base_url = "https://audiojungle.net"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "autofrage"
+display_name = "Autofrage"
+base_url = "https://www.autofrage.net"
+path_template = "/nutzer/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "aws-skills-profile"
+display_name = "AWS Skills Profile"
+base_url = "https://skillsprofile.skillbuilder.aws"
+path_template = "/user/{username}/"
+detection = "body_marker"
+not_found_marker = "shareProfileAccepted\":false"
+
+[[sites]]
+slug = "bandcamp"
+display_name = "Bandcamp"
+base_url = "https://www.bandcamp.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "behance"
+display_name = "Behance"
+base_url = "https://www.behance.net"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "bezuzyteczna"
+display_name = "Bezuzyteczna"
+base_url = "https://bezuzyteczna.pl"
+path_template = "/uzytkownicy/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "biggerpockets"
+display_name = "BiggerPockets"
+base_url = "https://www.biggerpockets.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "biohacking"
+display_name = "BioHacking"
+base_url = "https://forum.dangerousthings.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "bitbucket"
+display_name = "BitBucket"
+base_url = "https://bitbucket.org"
+path_template = "/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "bitwarden-forum"
+display_name = "Bitwarden Forum"
+base_url = "https://community.bitwarden.com"
+path_template = "/u/{username}/summary"
+detection = "status_code"
+
+[[sites]]
+slug = "blipfoto"
+display_name = "Blipfoto"
+base_url = "https://www.blipfoto.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "blitz-tactics"
+display_name = "Blitz Tactics"
+base_url = "https://blitztactics.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "That page doesn't exist"
+
+[[sites]]
+slug = "bluesky"
+display_name = "Bluesky"
+base_url = "https://bsky.app"
+path_template = "/profile/{username}.bsky.social"
+detection = "status_code"
+
+[[sites]]
+slug = "bongacams"
+display_name = "BongaCams"
+base_url = "https://pt.bongacams.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "bookcrossing"
+display_name = "Bookcrossing"
+base_url = "https://www.bookcrossing.com"
+path_template = "/mybookshelf/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "boardgamegeek"
+display_name = "BoardGameGeek"
+base_url = "https://boardgamegeek.com"
+path_template = "/user/{username}"
+detection = "body_marker"
+not_found_marker = "\"isValid\":true"
+
+[[sites]]
+slug = "bravecommunity"
+display_name = "BraveCommunity"
+base_url = "https://community.brave.com"
+path_template = "/u/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "breachsta-rs-forum"
+display_name = "BreachSta.rs Forum"
+base_url = "https://breachsta.rs"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "<title>Error - BreachStars</title>"
+
+[[sites]]
+slug = "bugcrowd"
+display_name = "BugCrowd"
+base_url = "https://bugcrowd.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "buymeacoffee"
+display_name = "BuyMeACoffee"
+base_url = "https://buymeacoff.ee"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "buzzfeed"
+display_name = "BuzzFeed"
+base_url = "https://buzzfeed.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "cfx-re-forum"
+display_name = "Cfx.re Forum"
+base_url = "https://forum.cfx.re"
+path_template = "/u/{username}/summary"
+detection = "status_code"
+
+[[sites]]
+slug = "cgtrader"
+display_name = "CGTrader"
+base_url = "https://www.cgtrader.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "cnet"
+display_name = "CNET"
+base_url = "https://www.cnet.com"
+path_template = "/profiles/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "cssbattle"
+display_name = "CSSBattle"
+base_url = "https://cssbattle.dev"
+path_template = "/player/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "ctan"
+display_name = "CTAN"
+base_url = "https://ctan.org"
+path_template = "/author/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "caddy-community"
+display_name = "Caddy Community"
+base_url = "https://caddy.community"
+path_template = "/u/{username}/summary"
+detection = "status_code"
+
+[[sites]]
+slug = "car-talk-community"
+display_name = "Car Talk Community"
+base_url = "https://community.cartalk.com"
+path_template = "/u/{username}/summary"
+detection = "status_code"
+
+[[sites]]
+slug = "career-habr"
+display_name = "Career.habr"
+base_url = "https://career.habr.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "<h1>Ошибка 404</h1>"
+
+[[sites]]
+slug = "cashapp"
+display_name = "CashApp"
+base_url = "https://cash.app"
+path_template = "/${username}"
+detection = "status_code"
+
+[[sites]]
+slug = "championat"
+display_name = "Championat"
+base_url = "https://www.championat.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "chaos"
+display_name = "Chaos"
+base_url = "https://chaos.social"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "chatujme-cz"
+display_name = "Chatujme.cz"
+base_url = "https://profil.chatujme.cz"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Neexistujicí profil"
+
+[[sites]]
+slug = "chaturbate"
+display_name = "ChaturBate"
+base_url = "https://chaturbate.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "chess"
+display_name = "Chess"
+base_url = "https://www.chess.com"
+path_template = "/member/{username}"
+detection = "body_marker"
+not_found_marker = "Username is valid"
+
+[[sites]]
+slug = "choice-community"
+display_name = "Choice Community"
+base_url = "https://choice.community"
+path_template = "/u/{username}/summary"
+detection = "status_code"
+
+[[sites]]
+slug = "clapper"
+display_name = "Clapper"
+base_url = "https://clapperapp.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "cloudflarecommunity"
+display_name = "CloudflareCommunity"
+base_url = "https://community.cloudflare.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "clozemaster"
+display_name = "Clozemaster"
+base_url = "https://www.clozemaster.com"
+path_template = "/players/{username}"
+detection = "body_marker"
+not_found_marker = "Oh no! Player not found."
+
+[[sites]]
+slug = "clubhouse"
+display_name = "Clubhouse"
+base_url = "https://www.clubhouse.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "code-snippet-wiki"
+display_name = "Code Snippet Wiki"
+base_url = "https://codesnippets.fandom.com"
+path_template = "/wiki/User:{username}"
+detection = "body_marker"
+not_found_marker = "This user has not filled out their profile page yet"
+
+[[sites]]
+slug = "codeberg"
+display_name = "Codeberg"
+base_url = "https://codeberg.org"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "codecademy"
+display_name = "Codecademy"
+base_url = "https://www.codecademy.com"
+path_template = "/profiles/{username}"
+detection = "body_marker"
+not_found_marker = "This profile could not be found"
+
+[[sites]]
+slug = "codeforces"
+display_name = "Codeforces"
+base_url = "https://codeforces.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "codepen"
+display_name = "Codepen"
+base_url = "https://codepen.io"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "coders-rank"
+display_name = "Coders Rank"
+base_url = "https://profile.codersrank.io"
+path_template = "/user/{username}/"
+detection = "body_marker"
+not_found_marker = "not a registered member"
+
+[[sites]]
+slug = "coderwall"
+display_name = "Coderwall"
+base_url = "https://coderwall.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "codesandbox"
+display_name = "CodeSandbox"
+base_url = "https://codesandbox.io"
+path_template = "/u/{username}"
+detection = "body_marker"
+not_found_marker = "Could not find user with username"
+
+[[sites]]
+slug = "codewars"
+display_name = "Codewars"
+base_url = "https://www.codewars.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "codolio"
+display_name = "Codolio"
+base_url = "https://codolio.com"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "<title>Page Not Found | Codolio</title>"
+
+[[sites]]
+slug = "coinvote"
+display_name = "Coinvote"
+base_url = "https://coinvote.cc"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "colourlovers"
+display_name = "ColourLovers"
+base_url = "https://www.colourlovers.com"
+path_template = "/lover/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "coroflot"
+display_name = "Coroflot"
+base_url = "https://www.coroflot.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "cplusplus"
+display_name = "Cplusplus"
+base_url = "https://cplusplus.com"
+path_template = "/user/{username}"
+detection = "body_marker"
+not_found_marker = "<title>404 Page Not Found</title>"
+
+[[sites]]
+slug = "cracked-forum"
+display_name = "Cracked Forum"
+base_url = "https://cracked.ax"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "credly"
+display_name = "Credly"
+base_url = "https://www.credly.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "crowdin"
+display_name = "Crowdin"
+base_url = "https://crowdin.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "cryptomator-forum"
+display_name = "Cryptomator Forum"
+base_url = "https://community.cryptomator.org"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "cults3d"
+display_name = "Cults3D"
+base_url = "https://cults3d.com"
+path_template = "/en/users/{username}/creations"
+detection = "body_marker"
+not_found_marker = "Oh dear, this page is not working!"
+
+[[sites]]
+slug = "cyberdefenders"
+display_name = "CyberDefenders"
+base_url = "https://cyberdefenders.org"
+path_template = "/p/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "dev-community"
+display_name = "DEV Community"
+base_url = "https://dev.to"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "dmoj"
+display_name = "DMOJ"
+base_url = "https://dmoj.ca"
+path_template = "/user/{username}"
+detection = "body_marker"
+not_found_marker = "No such user"
+
+[[sites]]
+slug = "dailymotion"
+display_name = "DailyMotion"
+base_url = "https://www.dailymotion.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "dcinside"
+display_name = "dcinside"
+base_url = "https://gallog.dcinside.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "dealabs"
+display_name = "Dealabs"
+base_url = "https://www.dealabs.com"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "La page que vous essayez"
+
+[[sites]]
+slug = "deviantart"
+display_name = "DeviantArt"
+base_url = "https://www.deviantart.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Llama Not Found"
+
+[[sites]]
+slug = "digitalspy"
+display_name = "DigitalSpy"
+base_url = "https://forums.digitalspy.com"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "The page you were looking for could not be found."
+
+[[sites]]
+slug = "discogs"
+display_name = "Discogs"
+base_url = "https://www.discogs.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "discord-bio"
+display_name = "Discord.bio"
+base_url = "https://discords.com"
+path_template = "/api-v2/bio/details/{username}"
+detection = "body_marker"
+not_found_marker = "<title>Server Error (500)</title>"
+
+[[sites]]
+slug = "discuss-elastic-co"
+display_name = "Discuss.Elastic.co"
+base_url = "https://discuss.elastic.co"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "disqus"
+display_name = "Disqus"
+base_url = "https://disqus.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "docker-hub"
+display_name = "Docker Hub"
+base_url = "https://hub.docker.com"
+path_template = "/u/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "dribbble"
+display_name = "Dribbble"
+base_url = "https://dribbble.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Whoops, that page is gone."
+
+[[sites]]
+slug = "duolingo"
+display_name = "Duolingo"
+base_url = "https://www.duolingo.com"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "{\"users\":[]}"
+
+[[sites]]
+slug = "eintracht-frankfurt-forum"
+display_name = "Eintracht Frankfurt Forum"
+base_url = "https://community.eintracht.de"
+path_template = "/fans/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "envato-forum"
+display_name = "Envato Forum"
+base_url = "https://forums.envato.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "erome"
+display_name = "Erome"
+base_url = "https://www.erome.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "exophase"
+display_name = "exophase"
+base_url = "https://www.exophase.com"
+path_template = "/user/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "eyeem"
+display_name = "EyeEm"
+base_url = "https://www.eyeem.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "f3-cool"
+display_name = "F3.cool"
+base_url = "https://f3.cool"
+path_template = "/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "fameswap"
+display_name = "Fameswap"
+base_url = "https://fameswap.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "fandom"
+display_name = "Fandom"
+base_url = "https://www.fandom.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "finanzfrage"
+display_name = "Finanzfrage"
+base_url = "https://www.finanzfrage.net"
+path_template = "/nutzer/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "flickr"
+display_name = "Flickr"
+base_url = "https://www.flickr.com"
+path_template = "/people/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "flightradar24"
+display_name = "Flightradar24"
+base_url = "https://my.flightradar24.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "flipboard"
+display_name = "Flipboard"
+base_url = "https://flipboard.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "football"
+display_name = "Football"
+base_url = "https://www.rusfootball.info"
+path_template = "/user/{username}/"
+detection = "body_marker"
+not_found_marker = "Пользователь с таким именем не найден"
+
+[[sites]]
+slug = "fortnitetracker"
+display_name = "FortniteTracker"
+base_url = "https://fortnitetracker.com"
+path_template = "/profile/all/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "forum-ophilia"
+display_name = "Forum Ophilia"
+base_url = "https://www.forumophilia.com"
+path_template = "/profile.php?mode=viewprofile&u={username}"
+detection = "body_marker"
+not_found_marker = "that user does not exist"
+
+[[sites]]
+slug = "fosstodon"
+display_name = "Fosstodon"
+base_url = "https://fosstodon.org"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "framapiaf"
+display_name = "Framapiaf"
+base_url = "https://framapiaf.org"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "freelancer"
+display_name = "Freelancer"
+base_url = "https://www.freelancer.com"
+path_template = "/u/{username}"
+detection = "body_marker"
+not_found_marker = "\"users\":{}"
+
+[[sites]]
+slug = "freesound"
+display_name = "Freesound"
+base_url = "https://freesound.org"
+path_template = "/people/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "gaiaonline"
+display_name = "GaiaOnline"
+base_url = "https://www.gaiaonline.com"
+path_template = "/profiles/{username}"
+detection = "body_marker"
+not_found_marker = "No user ID specified or user does not exist"
+
+[[sites]]
+slug = "gamespot"
+display_name = "Gamespot"
+base_url = "https://www.gamespot.com"
+path_template = "/profile/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "gamefaqs"
+display_name = "GameFAQs"
+base_url = "https://gamefaqs.gamespot.com"
+path_template = "/community/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "geeksforgeeks"
+display_name = "GeeksforGeeks"
+base_url = "https://auth.geeksforgeeks.org"
+path_template = "/user/{username}"
+detection = "body_marker"
+not_found_marker = "false   | GeeksforGeeks Profile"
+
+[[sites]]
+slug = "genius-artists"
+display_name = "Genius (Artists)"
+base_url = "https://genius.com"
+path_template = "/artists/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "genius-users"
+display_name = "Genius (Users)"
+base_url = "https://genius.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "gesundheitsfrage"
+display_name = "Gesundheitsfrage"
+base_url = "https://www.gesundheitsfrage.net"
+path_template = "/nutzer/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "getmyuni"
+display_name = "GetMyUni"
+base_url = "https://www.getmyuni.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "giant-bomb"
+display_name = "Giant Bomb"
+base_url = "https://www.giantbomb.com"
+path_template = "/profile/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "giphy"
+display_name = "Giphy"
+base_url = "https://giphy.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "<title> GIFs - Find &amp; Share on GIPHY</title>"
+
+[[sites]]
+slug = "github"
+display_name = "GitHub"
+base_url = "https://www.github.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "warframe-market"
+display_name = "Warframe Market"
+base_url = "https://warframe.market"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "gitlab"
+display_name = "GitLab"
+base_url = "https://gitlab.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "[]"
+
+[[sites]]
+slug = "gitea"
+display_name = "Gitea"
+base_url = "https://gitea.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "gitee"
+display_name = "Gitee"
+base_url = "https://gitee.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "goodreads"
+display_name = "GoodReads"
+base_url = "https://www.goodreads.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "google-play"
+display_name = "Google Play"
+base_url = "https://play.google.com"
+path_template = "/store/apps/developer?id={username}"
+detection = "body_marker"
+not_found_marker = "the requested URL was not found on this server"
+
+[[sites]]
+slug = "gradle"
+display_name = "Gradle"
+base_url = "https://plugins.gradle.org"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "gravatar"
+display_name = "Gravatar"
+base_url = "http://en.gravatar.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "gumroad"
+display_name = "Gumroad"
+base_url = "https://www.gumroad.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Page not found (404) - Gumroad"
+
+[[sites]]
+slug = "gutefrage"
+display_name = "Gutefrage"
+base_url = "https://www.gutefrage.net"
+path_template = "/nutzer/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hackthebox"
+display_name = "HackTheBox"
+base_url = "https://forum.hackthebox.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hackaday"
+display_name = "Hackaday"
+base_url = "https://hackaday.io"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hackenproof-hackers"
+display_name = "HackenProof (Hackers)"
+base_url = "https://hackenproof.com"
+path_template = "/hackers/{username}"
+detection = "body_marker"
+not_found_marker = "Page not found"
+
+[[sites]]
+slug = "hackerearth"
+display_name = "HackerEarth"
+base_url = "https://hackerearth.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hackernews"
+display_name = "HackerNews"
+base_url = "https://news.ycombinator.com"
+path_template = "/user?id={username}"
+detection = "body_marker"
+not_found_marker = "No such user."
+
+[[sites]]
+slug = "hackerone"
+display_name = "HackerOne"
+base_url = "https://hackerone.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Page not found"
+
+[[sites]]
+slug = "hackerrank"
+display_name = "HackerRank"
+base_url = "https://hackerrank.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Something went wrong"
+
+[[sites]]
+slug = "hackersploit"
+display_name = "HackerSploit"
+base_url = "https://forum.hackersploit.org"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hackmd"
+display_name = "HackMD"
+base_url = "https://hackmd.io"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "harvard-scholar"
+display_name = "Harvard Scholar"
+base_url = "https://scholar.harvard.edu"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hashnode"
+display_name = "Hashnode"
+base_url = "https://hashnode.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "heavy-r"
+display_name = "Heavy-R"
+base_url = "https://www.heavy-r.com"
+path_template = "/user/{username}"
+detection = "body_marker"
+not_found_marker = "Channel not found"
+
+[[sites]]
+slug = "hive-blog"
+display_name = "Hive Blog"
+base_url = "https://hive.blog"
+path_template = "/@{username}"
+detection = "body_marker"
+not_found_marker = "<title>User Not Found - Hive</title>"
+
+[[sites]]
+slug = "holopin"
+display_name = "Holopin"
+base_url = "https://holopin.io"
+path_template = "/@{username}"
+detection = "body_marker"
+not_found_marker = "true"
+
+[[sites]]
+slug = "houzz"
+display_name = "Houzz"
+base_url = "https://houzz.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hubpages"
+display_name = "HubPages"
+base_url = "https://hubpages.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hubski"
+display_name = "Hubski"
+base_url = "https://hubski.com"
+path_template = "/user/{username}"
+detection = "body_marker"
+not_found_marker = "No such user"
+
+[[sites]]
+slug = "hudsonrock"
+display_name = "HudsonRock"
+base_url = "https://cavalier.hudsonrock.com"
+path_template = "/api/json/v2/osint-tools/search-by-username?username={username}"
+detection = "body_marker"
+not_found_marker = "This username is not associated"
+
+[[sites]]
+slug = "hugging-face"
+display_name = "Hugging Face"
+base_url = "https://huggingface.co"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "ifttt"
+display_name = "IFTTT"
+base_url = "https://www.ifttt.com"
+path_template = "/p/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "ifunny"
+display_name = "Ifunny"
+base_url = "https://ifunny.co"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "icons8-community"
+display_name = "Icons8 Community"
+base_url = "https://community.icons8.com"
+path_template = "/u/{username}/summary"
+detection = "status_code"
+
+[[sites]]
+slug = "image-fap"
+display_name = "Image Fap"
+base_url = "https://www.imagefap.com"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "Not found"
+
+[[sites]]
+slug = "imgup-cz"
+display_name = "ImgUp.cz"
+base_url = "https://imgup.cz"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "imgur"
+display_name = "Imgur"
+base_url = "https://imgur.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "imood"
+display_name = "imood"
+base_url = "https://www.imood.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "instagram"
+display_name = "Instagram"
+base_url = "https://instagram.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "instapaper"
+display_name = "Instapaper"
+base_url = "https://www.instapaper.com"
+path_template = "/p/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "instructables"
+display_name = "Instructables"
+base_url = "https://www.instructables.com"
+path_template = "/member/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "intigriti"
+display_name = "Intigriti"
+base_url = "https://app.intigriti.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "ionic-forum"
+display_name = "Ionic Forum"
+base_url = "https://forum.ionicframework.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "issuu"
+display_name = "Issuu"
+base_url = "https://issuu.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "itemfix"
+display_name = "Itemfix"
+base_url = "https://www.itemfix.com"
+path_template = "/c/{username}"
+detection = "body_marker"
+not_found_marker = "<title>ItemFix - Channel: </title>"
+
+[[sites]]
+slug = "jellyfin-weblate"
+display_name = "Jellyfin Weblate"
+base_url = "https://translate.jellyfin.org"
+path_template = "/user/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "joplin-forum"
+display_name = "Joplin Forum"
+base_url = "https://discourse.joplinapp.org"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "jupyter-community-forum"
+display_name = "Jupyter Community Forum"
+base_url = "https://discourse.jupyter.org"
+path_template = "/u/{username}/summary"
+detection = "body_marker"
+not_found_marker = "Oops! That page doesn’t exist or is private."
+
+[[sites]]
+slug = "kaggle"
+display_name = "Kaggle"
+base_url = "https://www.kaggle.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "kaskus"
+display_name = "kaskus"
+base_url = "https://www.kaskus.co.id"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "keybase"
+display_name = "Keybase"
+base_url = "https://keybase.io"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "kick"
+display_name = "Kick"
+base_url = "https://kick.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "kik"
+display_name = "Kik"
+base_url = "https://kik.me"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "The page you requested was not found"
+
+[[sites]]
+slug = "kongregate"
+display_name = "Kongregate"
+base_url = "https://www.kongregate.com"
+path_template = "/accounts/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "lor"
+display_name = "LOR"
+base_url = "https://www.linux.org.ru"
+path_template = "/people/{username}/profile"
+detection = "status_code"
+
+[[sites]]
+slug = "laracast"
+display_name = "Laracast"
+base_url = "https://laracasts.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "launchpad"
+display_name = "Launchpad"
+base_url = "https://launchpad.net"
+path_template = "/~{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "leetcode"
+display_name = "LeetCode"
+base_url = "https://leetcode.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "lemmyworld"
+display_name = "LemmyWorld"
+base_url = "https://lemmy.world"
+path_template = "/u/{username}"
+detection = "body_marker"
+not_found_marker = "<h1>Error!</h1>"
+
+[[sites]]
+slug = "letterboxd"
+display_name = "Letterboxd"
+base_url = "https://letterboxd.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Sorry, we can’t find the page you’ve requested."
+
+[[sites]]
+slug = "librarything"
+display_name = "LibraryThing"
+base_url = "https://www.librarything.com"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "<p>Error: This user doesn't exist</p>"
+
+[[sites]]
+slug = "lichess"
+display_name = "Lichess"
+base_url = "https://lichess.org"
+path_template = "/@/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "linkedin"
+display_name = "LinkedIn"
+base_url = "https://linkedin.com"
+path_template = "/in/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "linktree"
+display_name = "Linktree"
+base_url = "https://linktr.ee"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "\"statusCode\":404"
+
+[[sites]]
+slug = "linuxfr-org"
+display_name = "LinuxFR.org"
+base_url = "https://linuxfr.org"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "lobsters"
+display_name = "Lobsters"
+base_url = "https://lobste.rs"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "lottiefiles"
+display_name = "LottieFiles"
+base_url = "https://lottiefiles.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "mmorpg-forum"
+display_name = "MMORPG Forum"
+base_url = "https://forums.mmorpg.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "mamot"
+display_name = "Mamot"
+base_url = "https://mamot.fr"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "medium"
+display_name = "Medium"
+base_url = "https://medium.com"
+path_template = "/@{username}"
+detection = "body_marker"
+not_found_marker = "<body"
+
+[[sites]]
+slug = "memrise"
+display_name = "Memrise"
+base_url = "https://www.memrise.com"
+path_template = "/user/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "minecraft"
+display_name = "Minecraft"
+base_url = "https://api.mojang.com"
+path_template = "/users/profiles/minecraft/{username}"
+detection = "body_marker"
+not_found_marker = "Couldn't find any profile with name"
+
+[[sites]]
+slug = "mixcloud"
+display_name = "MixCloud"
+base_url = "https://www.mixcloud.com"
+path_template = "/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "monkeytype"
+display_name = "Monkeytype"
+base_url = "https://monkeytype.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "motherless"
+display_name = "Motherless"
+base_url = "https://motherless.com"
+path_template = "/m/{username}"
+detection = "body_marker"
+not_found_marker = "no longer a member"
+
+[[sites]]
+slug = "motorradfrage"
+display_name = "Motorradfrage"
+base_url = "https://www.motorradfrage.net"
+path_template = "/nutzer/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "musescore"
+display_name = "MuseScore"
+base_url = "https://musescore.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "myanimelist"
+display_name = "MyAnimeList"
+base_url = "https://myanimelist.net"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "myminifactory"
+display_name = "MyMiniFactory"
+base_url = "https://www.myminifactory.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "mydramalist"
+display_name = "Mydramalist"
+base_url = "https://www.mydramalist.com"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "The requested page was not found"
+
+[[sites]]
+slug = "myspace"
+display_name = "Myspace"
+base_url = "https://myspace.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "nicommunityforum"
+display_name = "NICommunityForum"
+base_url = "https://community.native-instruments.com"
+path_template = "/profile/{username}"
+detection = "body_marker"
+not_found_marker = "The page you were looking for could not be found."
+
+[[sites]]
+slug = "namuwiki"
+display_name = "namuwiki"
+base_url = "https://namu.wiki"
+path_template = "/w/%EC%82%AC%EC%9A%A9%EC%9E%90:{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "nationstates-nation"
+display_name = "NationStates Nation"
+base_url = "https://nationstates.net"
+path_template = "/nation={username}"
+detection = "body_marker"
+not_found_marker = "Was this your nation? It may have ceased to exist due to inactivity, but can rise again!"
+
+[[sites]]
+slug = "nationstates-region"
+display_name = "NationStates Region"
+base_url = "https://nationstates.net"
+path_template = "/region={username}"
+detection = "body_marker"
+not_found_marker = "does not exist."
+
+[[sites]]
+slug = "naver"
+display_name = "Naver"
+base_url = "https://blog.naver.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "needrom"
+display_name = "Needrom"
+base_url = "https://www.needrom.com"
+path_template = "/author/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "nextcloud-forum"
+display_name = "Nextcloud Forum"
+base_url = "https://help.nextcloud.com"
+path_template = "/u/{username}/summary"
+detection = "status_code"
+
+[[sites]]
+slug = "nightbot"
+display_name = "Nightbot"
+base_url = "https://nightbot.tv"
+path_template = "/t/{username}/commands"
+detection = "status_code"
+
+[[sites]]
+slug = "nintendolife"
+display_name = "NintendoLife"
+base_url = "https://www.nintendolife.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "nitrotype"
+display_name = "NitroType"
+base_url = "https://www.nitrotype.com"
+path_template = "/racer/{username}"
+detection = "body_marker"
+not_found_marker = "<title>Nitro Type | Competitive Typing Game | Race Your Friends</title>"
+
+[[sites]]
+slug = "notabug-org"
+display_name = "NotABug.org"
+base_url = "https://notabug.org"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "nothing-community"
+display_name = "Nothing Community"
+base_url = "https://nothing.community"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "nyaa-si"
+display_name = "Nyaa.si"
+base_url = "https://nyaa.si"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "observablehq"
+display_name = "ObservableHQ"
+base_url = "https://observablehq.com"
+path_template = "/@{username}"
+detection = "body_marker"
+not_found_marker = "Page not found"
+
+[[sites]]
+slug = "open-collective"
+display_name = "Open Collective"
+base_url = "https://opencollective.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "opengameart"
+display_name = "OpenGameArt"
+base_url = "https://opengameart.org"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "openstreetmap"
+display_name = "OpenStreetMap"
+base_url = "https://www.openstreetmap.org"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "odysee"
+display_name = "Odysee"
+base_url = "https://odysee.com"
+path_template = "/@{username}"
+detection = "body_marker"
+not_found_marker = "<link rel=\"canonical\" content=\"odysee.com\"/>"
+
+[[sites]]
+slug = "opensource"
+display_name = "Opensource"
+base_url = "https://opensource.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "ourdjtalk"
+display_name = "OurDJTalk"
+base_url = "https://ourdjtalk.com"
+path_template = "/members?username={username}"
+detection = "body_marker"
+not_found_marker = "The specified member cannot be found"
+
+[[sites]]
+slug = "outgress"
+display_name = "Outgress"
+base_url = "https://outgress.com"
+path_template = "/agents/{username}"
+detection = "body_marker"
+not_found_marker = "Outgress - Error"
+
+[[sites]]
+slug = "pcgamer"
+display_name = "PCGamer"
+base_url = "https://forums.pcgamer.com"
+path_template = "/members/?username={username}"
+detection = "body_marker"
+not_found_marker = "The specified member cannot be found. Please enter a member's entire name."
+
+[[sites]]
+slug = "pastebin"
+display_name = "Pastebin"
+base_url = "https://pastebin.com"
+path_template = "/u/{username}"
+detection = "body_marker"
+not_found_marker = "Not Found (#404)"
+
+[[sites]]
+slug = "patched"
+display_name = "Patched"
+base_url = "https://patched.sh"
+path_template = "/User/{username}"
+detection = "body_marker"
+not_found_marker = "The member you specified is either invalid or doesn't exist."
+
+[[sites]]
+slug = "patreon"
+display_name = "Patreon"
+base_url = "https://www.patreon.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "pentesterlab"
+display_name = "PentesterLab"
+base_url = "https://pentesterlab.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hotukdeals"
+display_name = "HotUKdeals"
+base_url = "https://www.hotukdeals.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "mydealz"
+display_name = "Mydealz"
+base_url = "https://www.mydealz.de"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "chollometro"
+display_name = "Chollometro"
+base_url = "https://www.chollometro.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "peppernl"
+display_name = "PepperNL"
+base_url = "https://nl.pepper.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "pepperpl"
+display_name = "PepperPL"
+base_url = "https://www.pepper.pl"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "preisjaeger"
+display_name = "Preisjaeger"
+base_url = "https://www.preisjaeger.at"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "pepperdeals"
+display_name = "Pepperdeals"
+base_url = "https://www.pepperdeals.se"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "pepperealsus"
+display_name = "PepperealsUS"
+base_url = "https://www.pepperdeals.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "promodescuentos"
+display_name = "Promodescuentos"
+base_url = "https://www.promodescuentos.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "periscope"
+display_name = "Periscope"
+base_url = "https://www.periscope.tv"
+path_template = "/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "pinkbike"
+display_name = "Pinkbike"
+base_url = "https://www.pinkbike.com"
+path_template = "/u/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "pixelfed-social"
+display_name = "pixelfed.social"
+base_url = "https://pixelfed.social"
+path_template = "/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "playstore"
+display_name = "PlayStore"
+base_url = "https://play.google.com"
+path_template = "/store/apps/developer?id={username}"
+detection = "status_code"
+
+[[sites]]
+slug = "playstrategy"
+display_name = "Playstrategy"
+base_url = "https://playstrategy.org"
+path_template = "/@/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "plurk"
+display_name = "Plurk"
+base_url = "https://www.plurk.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "User Not Found!"
+
+[[sites]]
+slug = "pocketstars"
+display_name = "PocketStars"
+base_url = "https://pocketstars.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Join Your Favorite Adult Stars"
+
+[[sites]]
+slug = "pokemon-showdown"
+display_name = "Pokemon Showdown"
+base_url = "https://pokemonshowdown.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "polarsteps"
+display_name = "Polarsteps"
+base_url = "https://polarsteps.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "polygon"
+display_name = "Polygon"
+base_url = "https://www.polygon.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "pornhub"
+display_name = "Pornhub"
+base_url = "https://pornhub.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "producthunt"
+display_name = "ProductHunt"
+base_url = "https://www.producthunt.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "programming-dev"
+display_name = "programming.dev"
+base_url = "https://programming.dev"
+path_template = "/u/{username}"
+detection = "body_marker"
+not_found_marker = "Error!"
+
+[[sites]]
+slug = "pychess"
+display_name = "Pychess"
+base_url = "https://www.pychess.org"
+path_template = "/@/{username}"
+detection = "body_marker"
+not_found_marker = "404"
+
+[[sites]]
+slug = "promodj"
+display_name = "PromoDJ"
+base_url = "http://promodj.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "pronouns-page"
+display_name = "Pronouns.page"
+base_url = "https://pronouns.page"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "pypi"
+display_name = "PyPi"
+base_url = "https://pypi.org"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "python-org-discussions"
+display_name = "Python.org Discussions"
+base_url = "https://discuss.python.org"
+path_template = "/u/{username}/summary"
+detection = "body_marker"
+not_found_marker = "Oops! That page doesn’t exist or is private."
+
+[[sites]]
+slug = "rarible"
+display_name = "Rarible"
+base_url = "https://rarible.com"
+path_template = "/marketplace/api/v4/urls/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "rate-your-music"
+display_name = "Rate Your Music"
+base_url = "https://rateyourmusic.com"
+path_template = "/~{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "rclone-forum"
+display_name = "Rclone Forum"
+base_url = "https://forum.rclone.org"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "redtube"
+display_name = "RedTube"
+base_url = "https://www.redtube.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "redbubble"
+display_name = "Redbubble"
+base_url = "https://www.redbubble.com"
+path_template = "/people/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "reddit"
+display_name = "Reddit"
+base_url = "https://www.reddit.com"
+path_template = "/user/{username}"
+detection = "body_marker"
+not_found_marker = "Sorry, nobody on Reddit goes by that name."
+
+[[sites]]
+slug = "realmeye"
+display_name = "Realmeye"
+base_url = "https://www.realmeye.com"
+path_template = "/player/{username}"
+detection = "body_marker"
+not_found_marker = "Sorry, but we either:"
+
+[[sites]]
+slug = "reisefrage"
+display_name = "Reisefrage"
+base_url = "https://www.reisefrage.net"
+path_template = "/nutzer/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "replit-com"
+display_name = "Replit.com"
+base_url = "https://replit.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "reverbnation"
+display_name = "ReverbNation"
+base_url = "https://www.reverbnation.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Sorry, we couldn't find that page"
+
+[[sites]]
+slug = "roblox"
+display_name = "Roblox"
+base_url = "https://www.roblox.com"
+path_template = "/user.aspx?username={username}"
+detection = "status_code"
+
+[[sites]]
+slug = "rockettube"
+display_name = "RocketTube"
+base_url = "https://www.rockettube.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "OOPS! Houston, we have a problem"
+
+[[sites]]
+slug = "royalcams"
+display_name = "RoyalCams"
+base_url = "https://royalcams.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "ruby-forums"
+display_name = "Ruby Forums"
+base_url = "https://ruby-forum.com"
+path_template = "/u/{username}/summary"
+detection = "body_marker"
+not_found_marker = "Oops! That page doesn’t exist or is private."
+
+[[sites]]
+slug = "rubygems"
+display_name = "RubyGems"
+base_url = "https://rubygems.org"
+path_template = "/profiles/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "rumble"
+display_name = "Rumble"
+base_url = "https://rumble.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "runescape"
+display_name = "RuneScape"
+base_url = "https://apps.runescape.com"
+path_template = "/runemetrics/app/overview/player/{username}"
+detection = "body_marker"
+not_found_marker = "{\"error\":\"NO_PROFILE\",\"loggedIn\":\"false\"}"
+
+[[sites]]
+slug = "swapd"
+display_name = "SWAPD"
+base_url = "https://swapd.co"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "sbazar-cz"
+display_name = "Sbazar.cz"
+base_url = "https://www.sbazar.cz"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "scratch"
+display_name = "Scratch"
+base_url = "https://scratch.mit.edu"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "scribd"
+display_name = "Scribd"
+base_url = "https://www.scribd.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Page not found"
+
+[[sites]]
+slug = "seoforum"
+display_name = "SEOForum"
+base_url = "https://seoforum.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "shelf"
+display_name = "Shelf"
+base_url = "https://www.shelf.im"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "shitpostbot5000"
+display_name = "ShitpostBot5000"
+base_url = "https://www.shitpostbot.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "signal"
+display_name = "Signal"
+base_url = "https://community.signalusers.org"
+path_template = "/u/{username}"
+detection = "body_marker"
+not_found_marker = "Oops! That page doesn’t exist or is private."
+
+[[sites]]
+slug = "sketchfab"
+display_name = "Sketchfab"
+base_url = "https://sketchfab.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "slant"
+display_name = "Slant"
+base_url = "https://www.slant.co"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "slashdot"
+display_name = "Slashdot"
+base_url = "https://slashdot.org"
+path_template = "/~{username}"
+detection = "body_marker"
+not_found_marker = "user you requested does not exist"
+
+[[sites]]
+slug = "slideshare"
+display_name = "SlideShare"
+base_url = "https://slideshare.net"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "<title>Page no longer exists</title>"
+
+[[sites]]
+slug = "slides"
+display_name = "Slides"
+base_url = "https://slides.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "smule"
+display_name = "Smule"
+base_url = "https://www.smule.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Smule | Page Not Found (404)"
+
+[[sites]]
+slug = "snapchat"
+display_name = "Snapchat"
+base_url = "https://www.snapchat.com"
+path_template = "/add/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "soop"
+display_name = "SOOP"
+base_url = "https://www.sooplive.co.kr"
+path_template = "/station/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "soundcloud"
+display_name = "SoundCloud"
+base_url = "https://soundcloud.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "sourceforge"
+display_name = "SourceForge"
+base_url = "https://sourceforge.net"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "spacehey"
+display_name = "SpaceHey"
+base_url = "https://spacehey.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Not Found (Error 404) | SpaceHey"
+
+[[sites]]
+slug = "soylentnews"
+display_name = "SoylentNews"
+base_url = "https://soylentnews.org"
+path_template = "/~{username}"
+detection = "body_marker"
+not_found_marker = "The user you requested does not exist, no matter how much you wish this might be the case."
+
+[[sites]]
+slug = "speakerdeck"
+display_name = "SpeakerDeck"
+base_url = "https://speakerdeck.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "speedrun-com"
+display_name = "Speedrun.com"
+base_url = "https://speedrun.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "spells8"
+display_name = "Spells8"
+base_url = "https://forum.spells8.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "splice"
+display_name = "Splice"
+base_url = "https://splice.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "splits-io"
+display_name = "Splits.io"
+base_url = "https://splits.io"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "sporcle"
+display_name = "Sporcle"
+base_url = "https://www.sporcle.com"
+path_template = "/user/{username}/people"
+detection = "status_code"
+
+[[sites]]
+slug = "sportlerfrage"
+display_name = "Sportlerfrage"
+base_url = "https://www.sportlerfrage.net"
+path_template = "/nutzer/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "sportsru"
+display_name = "SportsRU"
+base_url = "https://www.sports.ru"
+path_template = "/profile/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "spotify"
+display_name = "Spotify"
+base_url = "https://open.spotify.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "star-citizen"
+display_name = "Star Citizen"
+base_url = "https://robertsspaceindustries.com"
+path_template = "/citizens/{username}"
+detection = "body_marker"
+not_found_marker = "404"
+
+[[sites]]
+slug = "status-cafe"
+display_name = "Status Cafe"
+base_url = "https://status.cafe"
+path_template = "/users/{username}"
+detection = "body_marker"
+not_found_marker = "Page Not Found"
+
+[[sites]]
+slug = "steam-community-group"
+display_name = "Steam Community (Group)"
+base_url = "https://steamcommunity.com"
+path_template = "/groups/{username}"
+detection = "body_marker"
+not_found_marker = "No group could be retrieved for the given URL"
+
+[[sites]]
+slug = "steam-community-user"
+display_name = "Steam Community (User)"
+base_url = "https://steamcommunity.com"
+path_template = "/id/{username}/"
+detection = "body_marker"
+not_found_marker = "The specified profile could not be found"
+
+[[sites]]
+slug = "strava"
+display_name = "Strava"
+base_url = "https://www.strava.com"
+path_template = "/athletes/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "sublimeforum"
+display_name = "SublimeForum"
+base_url = "https://forum.sublimetext.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "tetr-io"
+display_name = "TETR.IO"
+base_url = "https://ch.tetr.io"
+path_template = "/u/{username}"
+detection = "body_marker"
+not_found_marker = "No such user!"
+
+[[sites]]
+slug = "themoviedb"
+display_name = "TheMovieDB"
+base_url = "https://www.themoviedb.org"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "tiktok"
+display_name = "TikTok"
+base_url = "https://www.tiktok.com"
+path_template = "/@{username}"
+detection = "body_marker"
+not_found_marker = "\"statusCode\":10221"
+
+[[sites]]
+slug = "topcoder"
+display_name = "Topcoder"
+base_url = "https://profiles.topcoder.com"
+path_template = "/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "topmate"
+display_name = "Topmate"
+base_url = "https://topmate.io"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "traktrain"
+display_name = "TRAKTRAIN"
+base_url = "https://traktrain.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "telegram"
+display_name = "Telegram"
+base_url = "https://t.me"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "<title>Telegram Messenger</title>"
+
+[[sites]]
+slug = "tellonym-me"
+display_name = "Tellonym.me"
+base_url = "https://tellonym.me"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "tenor"
+display_name = "Tenor"
+base_url = "https://tenor.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "terraria-forums"
+display_name = "Terraria Forums"
+base_url = "https://forums.terraria.org"
+path_template = "/index.php?search/42798315/&c[users]={username}&o=relevance"
+detection = "body_marker"
+not_found_marker = "The following members could not be found"
+
+[[sites]]
+slug = "themeforest"
+display_name = "ThemeForest"
+base_url = "https://themeforest.net"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "tnaflix"
+display_name = "TnAFlix"
+base_url = "https://www.tnaflix.com"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "tradingview"
+display_name = "TradingView"
+base_url = "https://www.tradingview.com"
+path_template = "/u/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "trakt"
+display_name = "Trakt"
+base_url = "https://www.trakt.tv"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "trashboxru"
+display_name = "TrashboxRU"
+base_url = "https://trashbox.ru"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "trawelling"
+display_name = "Trawelling"
+base_url = "https://traewelling.de"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "trello"
+display_name = "Trello"
+base_url = "https://trello.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "model not found"
+
+[[sites]]
+slug = "tryhackme"
+display_name = "TryHackMe"
+base_url = "https://tryhackme.com"
+path_template = "/p/{username}"
+detection = "body_marker"
+not_found_marker = "{\"success\":false}"
+
+[[sites]]
+slug = "tuna"
+display_name = "Tuna"
+base_url = "https://tuna.voicemod.net"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "tweakers"
+display_name = "Tweakers"
+base_url = "https://tweakers.net"
+path_template = "/gallery/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "twitch"
+display_name = "Twitch"
+base_url = "https://www.twitch.tv"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "content='Twitch is the world&#39;s leading video platform and community for gamers.'"
+
+[[sites]]
+slug = "trovo"
+display_name = "Trovo"
+base_url = "https://trovo.live"
+path_template = "/s/{username}/"
+detection = "body_marker"
+not_found_marker = "Uh Ohhh..."
+
+[[sites]]
+slug = "twitter"
+display_name = "Twitter"
+base_url = "https://x.com"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "<div class=\"error-panel\"><span>User "
+
+[[sites]]
+slug = "typeracer"
+display_name = "Typeracer"
+base_url = "https://data.typeracer.com"
+path_template = "/pit/profile?user={username}"
+detection = "body_marker"
+not_found_marker = "Profile Not Found"
+
+[[sites]]
+slug = "ultimate-guitar"
+display_name = "Ultimate-Guitar"
+base_url = "https://ultimate-guitar.com"
+path_template = "/u/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "unsplash"
+display_name = "Unsplash"
+base_url = "https://unsplash.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "untappd"
+display_name = "Untappd"
+base_url = "https://untappd.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "valorant-forums"
+display_name = "Valorant Forums"
+base_url = "https://valorantforums.com"
+path_template = "/u/{username}"
+detection = "body_marker"
+not_found_marker = "The page you requested could not be found."
+
+[[sites]]
+slug = "vsco"
+display_name = "VSCO"
+base_url = "https://vsco.co"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "velog"
+display_name = "Velog"
+base_url = "https://velog.io"
+path_template = "/@{username}/posts"
+detection = "status_code"
+
+[[sites]]
+slug = "velomania"
+display_name = "Velomania"
+base_url = "https://forum.velomania.ru"
+path_template = "/member.php?username={username}"
+detection = "body_marker"
+not_found_marker = "Пользователь не зарегистрирован и не имеет профиля для просмотра."
+
+[[sites]]
+slug = "venmo"
+display_name = "Venmo"
+base_url = "https://account.venmo.com"
+path_template = "/u/{username}"
+detection = "body_marker"
+not_found_marker = "Venmo | Page Not Found"
+
+[[sites]]
+slug = "vero"
+display_name = "Vero"
+base_url = "https://vero.co"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "Not Found"
+
+[[sites]]
+slug = "vimeo"
+display_name = "Vimeo"
+base_url = "https://vimeo.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "virustotal"
+display_name = "VirusTotal"
+base_url = "https://www.virustotal.com"
+path_template = "/gui/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "vlr"
+display_name = "VLR"
+base_url = "https://www.vlr.gg"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "wicg-forum"
+display_name = "WICG Forum"
+base_url = "https://discourse.wicg.io"
+path_template = "/u/{username}/summary"
+detection = "status_code"
+
+[[sites]]
+slug = "wakatime"
+display_name = "Wakatime"
+base_url = "https://wakatime.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "warrior-forum"
+display_name = "Warrior Forum"
+base_url = "https://www.warriorforum.com"
+path_template = "/members/{username}.html"
+detection = "status_code"
+
+[[sites]]
+slug = "wattpad"
+display_name = "Wattpad"
+base_url = "https://www.wattpad.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "weblate"
+display_name = "Weblate"
+base_url = "https://hosted.weblate.org"
+path_template = "/user/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "wikidot"
+display_name = "Wikidot"
+base_url = "http://www.wikidot.com"
+path_template = "/user:info/{username}"
+detection = "body_marker"
+not_found_marker = "User does not exist."
+
+[[sites]]
+slug = "wikipedia"
+display_name = "Wikipedia"
+base_url = "https://en.wikipedia.org"
+path_template = "/wiki/Special:CentralAuth/{username}?uselang=qqx"
+detection = "body_marker"
+not_found_marker = "centralauth-admin-nonexistent:"
+
+[[sites]]
+slug = "windy"
+display_name = "Windy"
+base_url = "https://community.windy.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "wolframalphaforum"
+display_name = "WolframalphaForum"
+base_url = "https://community.wolfram.com"
+path_template = "/web/{username}/home"
+detection = "status_code"
+
+[[sites]]
+slug = "wordnik"
+display_name = "Wordnik"
+base_url = "https://www.wordnik.com"
+path_template = "/users/{username}"
+detection = "body_marker"
+not_found_marker = "Page Not Found"
+
+[[sites]]
+slug = "wykop"
+display_name = "Wykop"
+base_url = "https://www.wykop.pl"
+path_template = "/ludzie/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "xbox-gamertag"
+display_name = "Xbox Gamertag"
+base_url = "https://xboxgamertag.com"
+path_template = "/search/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "xvideos"
+display_name = "Xvideos"
+base_url = "https://xvideos.com"
+path_template = "/profiles/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "yandexmusic"
+display_name = "YandexMusic"
+base_url = "https://music.yandex"
+path_template = "/users/{username}/playlists"
+detection = "body_marker"
+not_found_marker = "Ошибка 404"
+
+[[sites]]
+slug = "younow"
+display_name = "YouNow"
+base_url = "https://www.younow.com"
+path_template = "/{username}/"
+detection = "body_marker"
+not_found_marker = "No users found"
+
+[[sites]]
+slug = "youpic"
+display_name = "YouPic"
+base_url = "https://youpic.com"
+path_template = "/photographer/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "youporn"
+display_name = "YouPorn"
+base_url = "https://youporn.com"
+path_template = "/uservids/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "youtube"
+display_name = "YouTube"
+base_url = "https://www.youtube.com"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "akniga"
+display_name = "akniga"
+base_url = "https://akniga.org"
+path_template = "/profile/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "authorstream"
+display_name = "authorSTREAM"
+base_url = "http://www.authorstream.com"
+path_template = "/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "chaos-social"
+display_name = "chaos.social"
+base_url = "https://chaos.social"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "couchsurfing"
+display_name = "couchsurfing"
+base_url = "https://www.couchsurfing.com"
+path_template = "/people/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "d3ru"
+display_name = "d3RU"
+base_url = "https://d3.ru"
+path_template = "/user/{username}/posts"
+detection = "status_code"
+
+[[sites]]
+slug = "dailykos"
+display_name = "dailykos"
+base_url = "https://www.dailykos.com"
+path_template = "/user/{username}"
+detection = "body_marker"
+not_found_marker = "{\"result\":true,\"message\":null}"
+
+[[sites]]
+slug = "datingru"
+display_name = "datingRU"
+base_url = "http://dating.ru"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "drive2"
+display_name = "drive2"
+base_url = "https://www.drive2.ru"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "egpu"
+display_name = "eGPU"
+base_url = "https://egpu.io"
+path_template = "/forums/profile/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "eintracht"
+display_name = "eintracht"
+base_url = "https://community.eintracht.de"
+path_template = "/fans/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "fixya"
+display_name = "fixya"
+base_url = "https://www.fixya.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "fl"
+display_name = "fl"
+base_url = "https://www.fl.ru"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "forum-guns"
+display_name = "forum_guns"
+base_url = "https://forum.guns.ru"
+path_template = "/forummisc/blog/{username}"
+detection = "body_marker"
+not_found_marker = "action=https://forum.guns.ru/forummisc/blog/search"
+
+[[sites]]
+slug = "freecodecamp"
+display_name = "freecodecamp"
+base_url = "https://www.freecodecamp.org"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "furaffinity"
+display_name = "furaffinity"
+base_url = "https://www.furaffinity.net"
+path_template = "/user/{username}"
+detection = "body_marker"
+not_found_marker = "This user cannot be found."
+
+[[sites]]
+slug = "geocaching"
+display_name = "geocaching"
+base_url = "https://www.geocaching.com"
+path_template = "/p/default.aspx?u={username}"
+detection = "status_code"
+
+[[sites]]
+slug = "habr"
+display_name = "habr"
+base_url = "https://habr.com"
+path_template = "/ru/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hackster"
+display_name = "hackster"
+base_url = "https://www.hackster.io"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "hunting"
+display_name = "hunting"
+base_url = "https://www.hunting.ru"
+path_template = "/forum/members/?username={username}"
+detection = "body_marker"
+not_found_marker = "Указанный пользователь не найден. Пожалуйста, введите другое имя."
+
+[[sites]]
+slug = "igromania"
+display_name = "igromania"
+base_url = "http://forum.igromania.ru"
+path_template = "/member.php?username={username}"
+detection = "body_marker"
+not_found_marker = "Пользователь не зарегистрирован и не имеет профиля для просмотра."
+
+[[sites]]
+slug = "interpals"
+display_name = "interpals"
+base_url = "https://www.interpals.net"
+path_template = "/{username}"
+detection = "body_marker"
+not_found_marker = "The requested user does not exist or is inactive"
+
+[[sites]]
+slug = "irecommend"
+display_name = "irecommend"
+base_url = "https://irecommend.ru"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "jbzd-com-pl"
+display_name = "jbzd.com.pl"
+base_url = "https://jbzd.com.pl"
+path_template = "/uzytkownik/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "jeuxvideo"
+display_name = "jeuxvideo"
+base_url = "https://www.jeuxvideo.com"
+path_template = "/profil/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "kwork"
+display_name = "kwork"
+base_url = "https://kwork.ru"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "last-fm"
+display_name = "last.fm"
+base_url = "https://last.fm"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "leasehackr"
+display_name = "leasehackr"
+base_url = "https://forum.leasehackr.com"
+path_template = "/u/{username}/summary/"
+detection = "status_code"
+
+[[sites]]
+slug = "livelib"
+display_name = "livelib"
+base_url = "https://www.livelib.ru"
+path_template = "/reader/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "mastodon-cloud"
+display_name = "mastodon.cloud"
+base_url = "https://mastodon.cloud"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "mastodon-social"
+display_name = "mastodon.social"
+base_url = "https://mastodon.social"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "mastodon-xyz"
+display_name = "mastodon.xyz"
+base_url = "https://mastodon.xyz"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "mstdn-social"
+display_name = "mstdn.social"
+base_url = "https://mstdn.social"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "mercadolivre"
+display_name = "mercadolivre"
+base_url = "https://www.mercadolivre.com.br"
+path_template = "/perfil/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "minds"
+display_name = "minds"
+base_url = "https://www.minds.com"
+path_template = "/{username}/"
+detection = "body_marker"
+not_found_marker = "\"valid\":true"
+
+[[sites]]
+slug = "moikrug"
+display_name = "moikrug"
+base_url = "https://moikrug.ru"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "mstdn-io"
+display_name = "mstdn.io"
+base_url = "https://mstdn.io"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "nairaland-com"
+display_name = "nairaland.com"
+base_url = "https://www.nairaland.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "n8n-community"
+display_name = "n8n Community"
+base_url = "https://community.n8n.io"
+path_template = "/u/{username}/summary"
+detection = "status_code"
+
+[[sites]]
+slug = "note"
+display_name = "note"
+base_url = "https://note.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "npm"
+display_name = "npm"
+base_url = "https://www.npmjs.com"
+path_template = "/~{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "opennet"
+display_name = "opennet"
+base_url = "https://www.opennet.ru"
+path_template = "/~{username}"
+detection = "body_marker"
+not_found_marker = "Имя участника не найдено"
+
+[[sites]]
+slug = "osu"
+display_name = "osu!"
+base_url = "https://osu.ppy.sh"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "phpru"
+display_name = "phpRU"
+base_url = "https://php.ru"
+path_template = "/forum/members/?username={username}"
+detection = "body_marker"
+not_found_marker = "Указанный пользователь не найден. Пожалуйста, введите другое имя."
+
+[[sites]]
+slug = "pikabu"
+display_name = "pikabu"
+base_url = "https://pikabu.ru"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "pinterest"
+display_name = "Pinterest"
+base_url = "https://www.pinterest.com"
+path_template = "/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "pr0gramm"
+display_name = "pr0gramm"
+base_url = "https://pr0gramm.com"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "satsisru"
+display_name = "satsisRU"
+base_url = "https://satsis.info"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "sessionize"
+display_name = "sessionize"
+base_url = "https://sessionize.com"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "social-tchncs-de"
+display_name = "social.tchncs.de"
+base_url = "https://social.tchncs.de"
+path_template = "/@{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "spletnik"
+display_name = "spletnik"
+base_url = "https://spletnik.ru"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "svidbook"
+display_name = "svidbook"
+base_url = "https://www.svidbook.ru"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "threads"
+display_name = "threads"
+base_url = "https://www.threads.net"
+path_template = "/@{username}"
+detection = "body_marker"
+not_found_marker = "<title>Threads • Log in</title>"
+
+[[sites]]
+slug = "toster"
+display_name = "toster"
+base_url = "https://www.toster.ru"
+path_template = "/user/{username}/answers"
+detection = "status_code"
+
+[[sites]]
+slug = "uid"
+display_name = "uid"
+base_url = "http://uid.me"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "write-as"
+display_name = "write.as"
+base_url = "https://write.as"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "xhamster"
+display_name = "xHamster"
+base_url = "https://xhamster.com"
+path_template = "/users/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "znanylekarz-pl"
+display_name = "znanylekarz.pl"
+base_url = "https://www.znanylekarz.pl"
+path_template = "/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "platzi"
+display_name = "Platzi"
+base_url = "https://platzi.com"
+path_template = "/p/{username}/"
+detection = "status_code"
+
+[[sites]]
+slug = "babyru"
+display_name = "BabyRu"
+base_url = "https://www.baby.ru"
+path_template = "/u/{username}"
+detection = "body_marker"
+not_found_marker = "Страница, которую вы искали, не найдена"
+
+[[sites]]
+slug = "wowhead"
+display_name = "Wowhead"
+base_url = "https://wowhead.com"
+path_template = "/user={username}"
+detection = "status_code"
+
+[[sites]]
+slug = "addons-wago-io"
+display_name = "addons.wago.io"
+base_url = "https://addons.wago.io"
+path_template = "/user/{username}"
+detection = "status_code"
+
+[[sites]]
+slug = "curseforge"
+display_name = "CurseForge"
+base_url = "https://www.curseforge.com"
+path_template = "/members/{username}/projects"
+detection = "status_code"
+

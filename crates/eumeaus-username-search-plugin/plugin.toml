@@ -37,4 +37,10 @@ requested_credentials = []
 [execution]
 entrypoint = "./eumeaus-username-search-plugin"
 default_rate_limit_per_sec = 5
-default_timeout_ms = 8000
+# Sized for a large custom sites.toml, not just the 3-site default list:
+# check() runs MAX_CONCURRENT_CHECKS (20, lib.rs) at a time, each with its
+# own 5s reqwest timeout, so a ~450-site list's worst case (every request
+# timing out) is ceil(450/20) * 5s ~= 115s — this leaves headroom above
+# that without making an ordinary small-list scan wait needlessly long on
+# a genuinely hung plugin.
+default_timeout_ms = 150000
