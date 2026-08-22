@@ -145,7 +145,7 @@ eumeaus entity add --type <Type> [--key <value>] [--attr k=v ...]
 eumeaus entity list [--type <Type>]
 eumeaus entity show <id>
 eumeaus entity merge <id1> <id2>
-eumeaus entity split <id> --facts <fact-id,...>
+eumeaus entity split <id> --facts <fact-id,...> --type <Type> [--key <value>]
 ```
 
 (`entity list` also accepts `--filter <expr>` — SPEC.md §3.4 shows it, but
@@ -164,7 +164,14 @@ it's currently a no-op; only `--type` actually filters.)
 - `merge id1 id2` absorbs `id2` into `id1` and prints the survivor's id
   (always `id1`). Recorded as an audit event — see `audit show`.
 - `split` needs fact ids — get them from `entity show`'s `(fact: ...)`
-  column.
+  column — plus `--type` for the new entity: not inherited from the
+  source, since a split's whole point is often that the moved facts
+  belong to a different kind of entity (e.g. a username fact split off
+  a `Person` becoming its own `Username` entity, not another `Person`).
+  `--key` is optional, same as `add`'s, but matters more than it might
+  look: without one the new entity has no `canonical_key` and can
+  never be a `scan run --target-value` — give it the split-off value
+  itself (e.g. the username), not the source entity's own key.
 
 ```console
 $ eumeaus case create acme-investigation --path .
@@ -195,7 +202,7 @@ attributes:
   * full_name = John Doe (fact: f883cb77-08cf-4db6-872a-ca164bb930c7, source: user, collected_at: 1787114078998)
   * nationality = US (fact: 52bd0def-fe7a-45d9-8bcf-372da4e8b7a1, source: user, collected_at: 1787114079057)
 $ eumeaus --case acme-investigation.eum entity split f8bac901-2693-45ed-ad4e-f1cf8028b195 \
-    --facts 52bd0def-fe7a-45d9-8bcf-372da4e8b7a1
+    --facts 52bd0def-fe7a-45d9-8bcf-372da4e8b7a1 --type Location --key US
 b20ff1f2-d961-4839-88bf-4990059f3c4e
 ```
 

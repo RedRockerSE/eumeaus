@@ -156,6 +156,19 @@ enum EntityCmd {
         id: String,
         #[arg(long)]
         facts: String,
+        /// The new entity's type — deliberately not inherited from the
+        /// source entity (e.g. splitting a username fact off a Person
+        /// should be able to produce a Username entity, not another
+        /// Person).
+        #[arg(long = "type")]
+        entity_type: String,
+        /// Same as `entity add --key` — optional, but without one the new
+        /// entity gets no canonical_key and can never be a `scan run
+        /// --target-value` (find_entity_by_key needs one to match
+        /// against). Give the split-off value itself here (e.g. the
+        /// username), not the source entity's own key.
+        #[arg(long)]
+        key: Option<String>,
     },
 }
 
@@ -566,11 +579,18 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 println!("{survivor}");
                 Ok(())
             }
-            EntityCmd::Split { id, facts } => {
+            EntityCmd::Split {
+                id,
+                facts,
+                entity_type,
+                key,
+            } => {
                 let mut case = require_case(&cli.case)?;
                 let new_id = case.split_entity(
                     parse_entity_id(&id)?,
                     parse_fact_ids(&facts)?,
+                    EntityType::from_str(&entity_type).expect("EntityType::from_str is infallible"),
+                    key,
                     default_actor(),
                 )?;
                 println!("{new_id}");

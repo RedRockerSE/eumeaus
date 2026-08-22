@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   AttributeInput,
   AuditEvent,
@@ -53,6 +53,12 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
 
   const [splitMode, setSplitMode] = useState(false);
   const [splitFactIds, setSplitFactIds] = useState<Set<string>>(new Set());
+  const [splitType, setSplitType] = useState("Person");
+  const [splitKey, setSplitKey] = useState("");
+  // Last value toggleSplitFact itself put into splitKey — lets it keep
+  // following the checkbox selection until the user types something of
+  // their own, without needing to track a separate "touched" flag.
+  const autoSplitKeyRef = useRef("");
 
   const [relationships, setRelationships] = useState<RelationshipDto[] | null>(null);
   const [relToId, setRelToId] = useState("");
@@ -194,9 +200,11 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
     if (!selectedId || splitFactIds.size === 0) return;
     setError(null);
     try {
-      await entitySplit(selectedId, Array.from(splitFactIds));
+      await entitySplit(selectedId, Array.from(splitFactIds), splitType, splitKey || null);
       setSplitMode(false);
       setSplitFactIds(new Set());
+      setSplitKey("");
+      autoSplitKeyRef.current = "";
       await refresh();
       onEntitiesChanged();
       selectEntity(selectedId); // re-fetch the (now smaller) entity
@@ -268,12 +276,23 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
   }
 
   function toggleSplitFact(factId: string) {
-    setSplitFactIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(factId)) next.delete(factId);
-      else next.add(factId);
-      return next;
-    });
+    const next = new Set(splitFactIds);
+    if (next.has(factId)) next.delete(factId);
+    else next.add(factId);
+    setSplitFactIds(next);
+
+    // Pre-fills the key with the split-off value when it's unambiguous —
+    // exactly one attribute among the selected facts (a fact can carry
+    // several, and more than one fact can be selected). Only overwrites
+    // what this function itself last put there, so it keeps tracking the
+    // selection right up until the user types something of their own —
+    // at which point their edit wins for the rest of this split session.
+    if (selected && splitKey === autoSplitKeyRef.current) {
+      const matching = selected.attributes.filter((a) => next.has(a.fact_id));
+      const suggestion = matching.length === 1 ? matching[0].value : "";
+      setSplitKey(suggestion);
+      autoSplitKeyRef.current = suggestion;
+    }
   }
 
   const selStyle = selected ? styleForEntityType(selected.entity_type) : null;
@@ -435,8 +454,25 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                   <button
                     className={"btn" + (splitMode ? " btn-primary" : "")}
                     onClick={() => {
-                      setSplitMode((v) => !v);
+                      setSplitMode((v) => {
+                        const next = !v;
+                        // Defaults to the source's own type — same
+                        // pre-fill-then-override pattern as newType above
+                        // — but only when it's one of the fixed types this
+                        // dropdown offers; a Custom(name) source falls back
+                        // to the same baseline newType itself starts at.
+                        if (next) {
+                          setSplitType(
+                            ENTITY_TYPES.includes(selected.entity_type)
+                              ? selected.entity_type
+                              : ENTITY_TYPES[0],
+                          );
+                        }
+                        return next;
+                      });
                       setSplitFactIds(new Set());
+                      setSplitKey("");
+                      autoSplitKeyRef.current = "";
                     }}
                   >
                     Split…
@@ -498,7 +534,24 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                           ? "Pick the facts that belong to a different entity."
                           : `${splitFactIds.size} fact${splitFactIds.size === 1 ? "" : "s"} will move to a new entity.`}
                       </span>
-                      <button className="btn btn-primary btn-small" style={{ marginLeft: "auto" }} onClick={doSplit} disabled={splitFactIds.size === 0}>
+                      <input
+                        className="mono"
+                        style={{ marginLeft: "auto", width: 140 }}
+                        value={splitKey}
+                        onChange={(e) => setSplitKey(e.currentTarget.value)}
+                        placeholder="Key (for scanning)"
+                      />
+                      <select
+                        className="btn-small"
+                        style={{ width: 130 }}
+                        value={splitType}
+                        onChange={(e) => setSplitType(e.currentTarget.value)}
+                      >
+                        {ENTITY_TYPES.map((t) => (
+                          <option key={t}>{t}</option>
+                        ))}
+                      </select>
+                      <button className="btn btn-primary btn-small" onClick={doSplit} disabled={splitFactIds.size === 0}>
                         Split into new entity
                       </button>
                     </div>

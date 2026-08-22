@@ -539,13 +539,28 @@ pub(crate) fn merge_entities(
 }
 
 /// Moves the given facts (and their attributes) off `id` onto a brand-new
-/// entity, and records the split as two `audit_events` rows — one on each
-/// side — so each entity's own audit trail shows what happened to it
-/// (SPEC.md §4.4).
+/// entity of `entity_type` — deliberately not always `source`'s own type
+/// (e.g. splitting a username fact off a Person should be able to produce
+/// a Username entity, not another Person) — and records the split as two
+/// `audit_events` rows — one on each side — so each entity's own audit
+/// trail shows what happened to it (SPEC.md §4.4).
+///
+/// `key` is optional, same as [`add_entity`]'s own `key`, and drives the
+/// new entity's `canonical_key`/`display_label` the same way: without one
+/// the new entity falls back to "{source label} (split)" and a NULL
+/// canonical_key — which works fine for browsing, but leaves the new
+/// entity unreachable as a scan target, since both the GUI's target picker
+/// and `find_entity_by_key` require a real canonical_key. Splitting a
+/// Username entity back out of a Person and actually wanting to scan it
+/// needs a key that's the split-off value itself (e.g. the username), not
+/// the source entity's own name — `split_entity` can't infer that from
+/// which facts moved, so the caller has to supply it.
 pub(crate) fn split_entity(
     conn: &mut Connection,
     id: EntityId,
     fact_ids: Vec<FactId>,
+    entity_type: EntityType,
+    key: Option<String>,
     actor: Actor,
 ) -> Result<EntityId, EngineError> {
     if fact_ids.is_empty() {
@@ -572,13 +587,15 @@ pub(crate) fn split_entity(
 
     let new_id = Uuid::new_v4();
     let now = now_unix_ms();
-    let display_label = format!("{} (split)", source.display_label);
+    let canonical_key = key.as_deref().map(normalize_key);
+    let display_label = key.unwrap_or_else(|| format!("{} (split)", source.display_label));
     tx.execute(
         "INSERT INTO entities (id, entity_type, canonical_key, display_label, created_at, updated_at)
-         VALUES (?1, ?2, NULL, ?3, ?4, ?4)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
         params![
             new_id.to_string(),
-            source.entity_type.to_string(),
+            entity_type.to_string(),
+            canonical_key,
             display_label,
             now,
         ],
@@ -1542,7 +1559,15 @@ mod tests {
             .unwrap();
         let fact_id = FactId(Uuid::parse_str(&fact_id).unwrap());
 
-        let new_id = split_entity(&mut conn, id, vec![fact_id], actor()).unwrap();
+        let new_id = split_entity(
+            &mut conn,
+            id,
+            vec![fact_id],
+            EntityType::Person,
+            None,
+            actor(),
+        )
+        .unwrap();
         assert_ne!(new_id, id);
 
         let original_attrs = list_attribute_records(&conn, id).unwrap();
@@ -1593,8 +1618,137 @@ mod tests {
             .unwrap();
         let b_fact_id = FactId(Uuid::parse_str(&b_fact_id).unwrap());
 
-        let err = split_entity(&mut conn, a, vec![b_fact_id], actor()).unwrap_err();
+        let err = split_entity(
+            &mut conn,
+            a,
+            vec![b_fact_id],
+            EntityType::Person,
+            None,
+            actor(),
+        )
+        .unwrap_err();
         assert!(matches!(err, EngineError::FactNotFound(_, _)));
+    }
+
+    #[test]
+    fn split_entity_creates_the_requested_type_not_the_sources() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![attr("username", "octocat")],
+            test_provenance(),
+        )
+        .unwrap();
+        let fact_id: String = conn
+            .query_row(
+                "SELECT id FROM facts WHERE entity_id = ?1",
+                params![id.0.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let fact_id = FactId(Uuid::parse_str(&fact_id).unwrap());
+
+        let new_id = split_entity(
+            &mut conn,
+            id,
+            vec![fact_id],
+            EntityType::Username,
+            None,
+            actor(),
+        )
+        .unwrap();
+
+        let source = get_entity(&conn, id).unwrap();
+        let new_entity = get_entity(&conn, new_id).unwrap();
+        assert_eq!(source.entity_type, EntityType::Person, "source untouched");
+        assert_eq!(new_entity.entity_type, EntityType::Username);
+    }
+
+    #[test]
+    fn split_entity_without_a_key_falls_back_to_a_null_canonical_key_and_a_split_suffix_label() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![attr("note", "seen downtown")],
+            test_provenance(),
+        )
+        .unwrap();
+        let source = get_entity(&conn, id).unwrap();
+        let fact_id: String = conn
+            .query_row(
+                "SELECT id FROM facts WHERE entity_id = ?1",
+                params![id.0.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let fact_id = FactId(Uuid::parse_str(&fact_id).unwrap());
+
+        let new_id = split_entity(
+            &mut conn,
+            id,
+            vec![fact_id],
+            EntityType::Document,
+            None,
+            actor(),
+        )
+        .unwrap();
+
+        let new_entity = get_entity(&conn, new_id).unwrap();
+        assert_eq!(new_entity.canonical_key, None);
+        assert_eq!(
+            new_entity.display_label,
+            format!("{} (split)", source.display_label)
+        );
+    }
+
+    // The bug report this fixes: splitting a username fact off a Person
+    // into a new Username entity with no way to give it a canonical_key
+    // meant the new entity could never be a scan target — both the GUI's
+    // target picker and find_entity_by_key require one (see split_entity's
+    // own doc comment). Supplying `key` here proves the new entity is
+    // actually reachable the same way any normally-added entity is.
+    #[test]
+    fn split_entity_with_a_key_produces_a_findable_scan_target() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![attr("username", "octocat")],
+            test_provenance(),
+        )
+        .unwrap();
+        let fact_id: String = conn
+            .query_row(
+                "SELECT id FROM facts WHERE entity_id = ?1",
+                params![id.0.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let fact_id = FactId(Uuid::parse_str(&fact_id).unwrap());
+
+        let new_id = split_entity(
+            &mut conn,
+            id,
+            vec![fact_id],
+            EntityType::Username,
+            Some("Octocat".to_string()),
+            actor(),
+        )
+        .unwrap();
+
+        let new_entity = get_entity(&conn, new_id).unwrap();
+        assert_eq!(new_entity.canonical_key.as_deref(), Some("octocat"));
+        assert_eq!(new_entity.display_label, "Octocat");
+
+        let found = find_entity_by_key(&conn, EntityType::Username, "octocat")
+            .unwrap()
+            .expect("split-off entity must be findable by its new key");
+        assert_eq!(found.id, new_id);
     }
 
     #[test]
