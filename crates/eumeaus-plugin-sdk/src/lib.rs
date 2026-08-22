@@ -55,6 +55,10 @@ pub trait PluginRuntime: Send + Sync + 'static {
 
 struct Adapter<R>(R);
 
+// Method signatures are dictated by the generated ProtoPluginRuntime trait
+// (tonic::Status is inherently >128 bytes) — same rationale as
+// eumeaus-plugin-protocol's own crate-level allow.
+#[allow(clippy::result_large_err)]
 #[async_trait::async_trait]
 impl<R: PluginRuntime> ProtoPluginRuntime for Adapter<R> {
     async fn describe(
