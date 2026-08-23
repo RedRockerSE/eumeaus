@@ -6,12 +6,24 @@ const win = getCurrentWindow();
 // Custom titlebar (SPEC.md §9, UX redesign): tauri.conf.json sets
 // decorations: false, so there's no OS-native window chrome at all —
 // these three buttons are the *only* way to minimize/maximize/close the
-// window. `data-tauri-drag-region` makes the empty space draggable,
-// matching normal native-titlebar behavior.
+// window. `data-tauri-drag-region` is kept as the standard declarative
+// hint, but it only matches the *exact* element under the pointer, not
+// its ancestors — a plain child (e.g. a text node inside .titlebar-brand)
+// falls through it with no drag starting, which is what made most of the
+// bar feel undraggable. The onMouseDown handler below is the reliable
+// fix: React bubbles the event up from wherever it actually started, so
+// startDragging() fires for a press anywhere in this div, not just the
+// handful of elements explicitly tagged.
 export default function TitleBar({ current }: { current: CaseInfo | null }) {
   return (
     <div className="titlebar">
-      <div className="titlebar-drag" data-tauri-drag-region>
+      <div
+        className="titlebar-drag"
+        data-tauri-drag-region
+        onMouseDown={(e) => {
+          if (e.button === 0) win.startDragging();
+        }}
+      >
         <div className="titlebar-brand">
           <div className="titlebar-mark">E</div>
           <span className="titlebar-name">Eumeaus</span>
