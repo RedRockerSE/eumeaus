@@ -985,6 +985,7 @@ default_timeout_ms = {default_timeout_ms}
         let entities = case
             .list_entities(EntityFilter {
                 entity_type: Some(EntityType::OnlineAccount),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(entities.len(), 1);
@@ -1229,11 +1230,13 @@ default_timeout_ms = {default_timeout_ms}
         let entities_a = case_a
             .list_entities(EntityFilter {
                 entity_type: Some(EntityType::OnlineAccount),
+                ..Default::default()
             })
             .unwrap();
         let entities_b = case_b
             .list_entities(EntityFilter {
                 entity_type: Some(EntityType::OnlineAccount),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(entities_a.len(), 1);
@@ -1429,6 +1432,7 @@ default_timeout_ms = {default_timeout_ms}
         let entities = case
             .list_entities(EntityFilter {
                 entity_type: Some(EntityType::OnlineAccount),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(entities.len(), 1);
@@ -1524,6 +1528,7 @@ default_timeout_ms = {default_timeout_ms}
             entity_type: EntityType::CryptoWallet,
             canonical_key: Some("1a1zp1ep5qgefi2dmptftl5slmv7divfna".to_string()),
             display_label: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa".to_string(),
+            hidden: false,
         };
 
         let request =

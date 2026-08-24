@@ -17,6 +17,7 @@ export interface EntitySummary {
   entity_type: string;
   canonical_key: string | null;
   display_label: string;
+  hidden: boolean;
 }
 
 export interface AttributeRecord {
@@ -120,11 +121,14 @@ export const caseList = (dir: string) => invoke<CaseInfo[]>("case_list", { dir }
 
 // ---- entity_state.rs ----
 
-export const entityList = (entityType: string | null) =>
-  invoke<EntitySummary[]>("entity_list", { entityType });
+export const entityList = (entityType: string | null, includeHidden = false) =>
+  invoke<EntitySummary[]>("entity_list", { entityType, includeHidden });
 export const entityShow = (id: string) => invoke<EntityDetail>("entity_show", { id });
 export const entityAdd = (entityType: string, key: string | null, attrs: AttributeInput[]) =>
   invoke<EntitySummary>("entity_add", { entityType, key, attrs });
+export const entityHide = (id: string, reason: string | null) =>
+  invoke<void>("entity_hide", { id, reason });
+export const entityUnhide = (id: string) => invoke<void>("entity_unhide", { id });
 export const entityMerge = (id1: string, id2: string) =>
   invoke<EntitySummary>("entity_merge", { id1, id2 });
 export const entitySplit = (
@@ -149,7 +153,8 @@ export const relationshipAdd = (
   relType: string,
   attrs: AttributeInput[],
 ) => invoke<string>("relationship_add", { from, to, relType, attrs });
-export const relationshipList = () => invoke<RelationshipDto[]>("relationship_list");
+export const relationshipList = (includeHidden = false) =>
+  invoke<RelationshipDto[]>("relationship_list", { includeHidden });
 export const entitySetPosition = (id: string, x: number, y: number) =>
   invoke<void>("entity_set_position", { id, x, y });
 export const entityListPositions = () => invoke<EntityPosition[]>("entity_list_positions");
