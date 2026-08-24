@@ -80,6 +80,7 @@ pub struct EntitySummary {
     pub entity_type: String,
     pub canonical_key: Option<String>,
     pub display_label: String,
+    pub hidden: bool,
 }
 
 impl From<eumeaus_engine::Entity> for EntitySummary {
@@ -89,6 +90,7 @@ impl From<eumeaus_engine::Entity> for EntitySummary {
             entity_type: e.entity_type.to_string(),
             canonical_key: e.canonical_key,
             display_label: e.display_label,
+            hidden: e.hidden,
         }
     }
 }
@@ -191,6 +193,7 @@ const NO_CASE_OPEN: &str = "no case is currently open — open a case first";
 fn do_entity_list(
     cell: &Arc<Mutex<Option<Case>>>,
     entity_type: Option<String>,
+    include_hidden: bool,
 ) -> Result<Vec<EntitySummary>, String> {
     let guard = cell.lock().unwrap();
     let case = guard.as_ref().ok_or(NO_CASE_OPEN)?;
@@ -199,6 +202,7 @@ fn do_entity_list(
         // hatch) — an unrecognized string just becomes Custom(s), same as
         // the CLI's own `entity list --type` handling.
         entity_type: entity_type.map(|t| t.parse().expect("infallible")),
+        include_hidden,
     };
     case.list_entities(filter)
         .map(|entities| entities.into_iter().map(EntitySummary::from).collect())
@@ -356,6 +360,26 @@ fn do_fact_redact(
             .map_err(|e| format!("invalid fact id: {e}"))?,
     );
     case.redact_fact(fact_id, default_actor(), reason)
+        .map_err(|e| e.to_string())
+}
+
+fn do_entity_hide(
+    cell: &Arc<Mutex<Option<Case>>>,
+    id: &str,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let mut guard = cell.lock().unwrap();
+    let case = guard.as_mut().ok_or(NO_CASE_OPEN)?;
+    let entity_id = EntityId(id.parse().map_err(|e| format!("invalid entity id: {e}"))?);
+    case.hide_entity(entity_id, default_actor(), reason.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+fn do_entity_unhide(cell: &Arc<Mutex<Option<Case>>>, id: &str) -> Result<(), String> {
+    let mut guard = cell.lock().unwrap();
+    let case = guard.as_mut().ok_or(NO_CASE_OPEN)?;
+    let entity_id = EntityId(id.parse().map_err(|e| format!("invalid entity id: {e}"))?);
+    case.unhide_entity(entity_id, default_actor())
         .map_err(|e| e.to_string())
 }
 
@@ -529,6 +553,26 @@ pub async fn fact_redact(
 }
 
 #[tauri::command]
+pub async fn entity_hide(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    reason: Option<String>,
+) -> Result<(), String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_hide(&cell, &id, reason))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn entity_unhide(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_unhide(&cell, &id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn entity_merge(
     state: tauri::State<'_, AppState>,
     id1: String,
@@ -633,10 +677,13 @@ impl From<Relationship> for RelationshipDto {
     }
 }
 
-fn do_relationship_list(cell: &Arc<Mutex<Option<Case>>>) -> Result<Vec<RelationshipDto>, String> {
+fn do_relationship_list(
+    cell: &Arc<Mutex<Option<Case>>>,
+    include_hidden: bool,
+) -> Result<Vec<RelationshipDto>, String> {
     let guard = cell.lock().unwrap();
     let case = guard.as_ref().ok_or(NO_CASE_OPEN)?;
-    case.list_relationships()
+    case.list_relationships(include_hidden)
         .map(|rels| rels.into_iter().map(RelationshipDto::from).collect())
         .map_err(|e| e.to_string())
 }
@@ -644,9 +691,10 @@ fn do_relationship_list(cell: &Arc<Mutex<Option<Case>>>) -> Result<Vec<Relations
 #[tauri::command]
 pub async fn relationship_list(
     state: tauri::State<'_, AppState>,
+    include_hidden: bool,
 ) -> Result<Vec<RelationshipDto>, String> {
     let cell = state.0.clone();
-    tauri::async_runtime::spawn_blocking(move || do_relationship_list(&cell))
+    tauri::async_runtime::spawn_blocking(move || do_relationship_list(&cell, include_hidden))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -686,9 +734,10 @@ pub async fn entity_audit(
 pub async fn entity_list(
     state: tauri::State<'_, AppState>,
     entity_type: Option<String>,
+    include_hidden: bool,
 ) -> Result<Vec<EntitySummary>, String> {
     let cell = state.0.clone();
-    tauri::async_runtime::spawn_blocking(move || do_entity_list(&cell, entity_type))
+    tauri::async_runtime::spawn_blocking(move || do_entity_list(&cell, entity_type, include_hidden))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -715,7 +764,10 @@ mod tests {
     #[test]
     fn list_and_show_error_cleanly_with_no_case_open() {
         let cell: Arc<Mutex<Option<Case>>> = Arc::new(Mutex::new(None));
-        assert_eq!(do_entity_list(&cell, None).unwrap_err(), NO_CASE_OPEN);
+        assert_eq!(
+            do_entity_list(&cell, None, false).unwrap_err(),
+            NO_CASE_OPEN
+        );
         assert_eq!(
             do_entity_show(&cell, "00000000-0000-0000-0000-000000000000").unwrap_err(),
             NO_CASE_OPEN
@@ -756,7 +808,7 @@ mod tests {
 
         let cell = tmp_cell_with_case(case);
 
-        let listed = do_entity_list(&cell, None).unwrap();
+        let listed = do_entity_list(&cell, None, false).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, entity_id.to_string());
         assert_eq!(listed[0].entity_type, "Username");
@@ -791,7 +843,7 @@ mod tests {
         .unwrap();
 
         let cell = tmp_cell_with_case(case);
-        let usernames = do_entity_list(&cell, Some("Username".to_string())).unwrap();
+        let usernames = do_entity_list(&cell, Some("Username".to_string()), false).unwrap();
         assert_eq!(usernames.len(), 1);
         assert_eq!(usernames[0].entity_type, "Username");
     }
@@ -854,7 +906,7 @@ mod tests {
 
         // Still exactly one Person — the bug this replaces would have
         // silently created a second entity via entity_add's no-key path.
-        let all = do_entity_list(&cell, Some("Person".to_string())).unwrap();
+        let all = do_entity_list(&cell, Some("Person".to_string()), false).unwrap();
         assert_eq!(all.len(), 1);
     }
 
@@ -1018,6 +1070,101 @@ mod tests {
         assert_eq!(events[0].actor, "user");
     }
 
+    // Issue #9: a GUI-initiated hide excludes the entity from entity_list
+    // by default, includes it with include_hidden, and shows up in the
+    // entity's own audit trail — same shape crud.rs's own
+    // hide_entity_excludes_it_from_list_entities_by_default/
+    // hide_entity_records_an_audit_event tests already check directly.
+    #[test]
+    fn entity_hide_excludes_from_list_by_default_and_records_audit_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g9-hide").unwrap();
+        let id = case
+            .add_entity(
+                EntityType::OnlineAccount,
+                Some("false-positive".to_string()),
+                vec![],
+                manual_provenance(),
+            )
+            .unwrap();
+
+        let cell = tmp_cell_with_case(case);
+        do_entity_hide(
+            &cell,
+            &id.to_string(),
+            Some("not actually them".to_string()),
+        )
+        .unwrap();
+
+        let visible = do_entity_list(&cell, None, false).unwrap();
+        assert!(!visible.iter().any(|e| e.id == id.to_string()));
+
+        let all = do_entity_list(&cell, None, true).unwrap();
+        let hidden_entity = all.iter().find(|e| e.id == id.to_string()).unwrap();
+        assert!(hidden_entity.hidden);
+
+        let guard = cell.lock().unwrap();
+        let events = guard
+            .as_ref()
+            .unwrap()
+            .audit_trail(eumeaus_engine::AuditTarget::Entity(id))
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "hide");
+    }
+
+    #[test]
+    fn entity_unhide_makes_it_visible_in_entity_list_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g9-unhide").unwrap();
+        let id = case
+            .add_entity(
+                EntityType::OnlineAccount,
+                Some("false-positive".to_string()),
+                vec![],
+                manual_provenance(),
+            )
+            .unwrap();
+
+        let cell = tmp_cell_with_case(case);
+        do_entity_hide(&cell, &id.to_string(), None).unwrap();
+        do_entity_unhide(&cell, &id.to_string()).unwrap();
+
+        let visible = do_entity_list(&cell, None, false).unwrap();
+        assert!(visible.iter().any(|e| e.id == id.to_string()));
+    }
+
+    #[test]
+    fn relationship_list_excludes_an_edge_when_either_endpoint_is_hidden() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g9-relationship-hide").unwrap();
+        let a = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let b = case
+            .add_entity(
+                EntityType::OnlineAccount,
+                Some("false-positive".to_string()),
+                vec![],
+                manual_provenance(),
+            )
+            .unwrap();
+        case.add_relationship(
+            a,
+            b,
+            RelationshipType::Custom("owns".to_string()),
+            vec![],
+            manual_provenance(),
+        )
+        .unwrap();
+
+        let cell = tmp_cell_with_case(case);
+        do_entity_hide(&cell, &b.to_string(), None).unwrap();
+
+        assert!(do_relationship_list(&cell, false).unwrap().is_empty());
+        assert_eq!(do_relationship_list(&cell, true).unwrap().len(), 1);
+    }
+
     #[test]
     fn entity_split_produces_the_same_audit_event_shape_the_cli_relies_on() {
         let dir = tempfile::tempdir().unwrap();
@@ -1164,7 +1311,18 @@ mod tests {
             .unwrap_err(),
             NO_CASE_OPEN
         );
-        assert_eq!(do_relationship_list(&cell).unwrap_err(), NO_CASE_OPEN);
+        assert_eq!(
+            do_relationship_list(&cell, false).unwrap_err(),
+            NO_CASE_OPEN
+        );
+        assert_eq!(
+            do_entity_hide(&cell, "00000000-0000-0000-0000-000000000000", None).unwrap_err(),
+            NO_CASE_OPEN
+        );
+        assert_eq!(
+            do_entity_unhide(&cell, "00000000-0000-0000-0000-000000000000").unwrap_err(),
+            NO_CASE_OPEN
+        );
     }
 
     #[test]
@@ -1182,7 +1340,7 @@ mod tests {
         let rel_id =
             do_relationship_add(&cell, &a.to_string(), &b.to_string(), "MemberOf", vec![]).unwrap();
 
-        let rels = do_relationship_list(&cell).unwrap();
+        let rels = do_relationship_list(&cell, false).unwrap();
         assert_eq!(rels.len(), 1);
         assert_eq!(rels[0].id, rel_id);
         assert_eq!(rels[0].from, a.to_string());

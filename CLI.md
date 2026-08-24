@@ -142,8 +142,10 @@ passphrase.
 
 ```
 eumeaus entity add --type <Type> [--key <value>] [--attr k=v ...]
-eumeaus entity list [--type <Type>]
+eumeaus entity list [--type <Type>] [--include-hidden]
 eumeaus entity show <id>
+eumeaus entity hide <id> [--reason <text>]
+eumeaus entity unhide <id>
 eumeaus entity merge <id1> <id2>
 eumeaus entity split <id> --facts <fact-id,...> --type <Type> [--key <value>]
 ```
@@ -156,11 +158,18 @@ it's currently a no-op; only `--type` actually filters.)
   same `--type`/`--key` again doesn't create a duplicate, it appends a new
   fact to the existing entity — repeat the example below with
   `--key JDOE123` and it merges into the same `jdoe123` entity.
-- `list` prints one tab-separated row per entity: `id  type  canonical_key  display_label`.
+- `list` prints one tab-separated row per entity: `id  type  canonical_key  display_label`
+  (a trailing `(hidden)` marks a hidden one, only shown at all with
+  `--include-hidden`).
 - `show` prints the entity plus every attribute fact recorded on it, each
   tagged with the fact id that produced it, `*` marking the current value
   per key and flagging conflicting ones (SPEC.md §4.4) — see
   [Attribute conflicts](#attribute-conflicts).
+- `hide`/`unhide` reversibly dismiss an entity (e.g. a false-positive scan
+  finding) without deleting anything — nothing is removed, it's just
+  excluded from `entity list`/`relationship list` (and the GUI's Graph
+  screen/scan-target picker) by default. Recorded as an audit event each
+  time, same as `merge`/`split` — see `audit show`.
 - `merge id1 id2` absorbs `id2` into `id1` and prints the survivor's id
   (always `id1`). Recorded as an audit event — see `audit show`.
 - `split` needs fact ids — get them from `entity show`'s `(fact: ...)`

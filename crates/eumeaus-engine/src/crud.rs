@@ -23,9 +23,14 @@ fn normalize_key(raw: &str) -> String {
     raw.trim().to_lowercase()
 }
 
+/// Expects the query to select `id, entity_type, canonical_key,
+/// display_label` plus a 5th column via `LEFT JOIN entity_hidden` —
+/// `hidden_at` (NULL when not hidden) — so `Entity::hidden` is always
+/// populated accurately rather than needing a separate lookup.
 fn entity_from_row(row: &Row) -> rusqlite::Result<Entity> {
     let id: String = row.get(0)?;
     let entity_type: String = row.get(1)?;
+    let hidden_at: Option<i64> = row.get(4)?;
     Ok(Entity {
         id: EntityId(Uuid::parse_str(&id).expect("stored entity id is a valid uuid")),
         entity_type: entity_type
@@ -33,6 +38,7 @@ fn entity_from_row(row: &Row) -> rusqlite::Result<Entity> {
             .expect("EntityType::from_str is infallible"),
         canonical_key: row.get(2)?,
         display_label: row.get(3)?,
+        hidden: hidden_at.is_some(),
     })
 }
 
@@ -60,9 +66,16 @@ fn ensure_relationship_exists(conn: &Connection, id: RelationshipId) -> Result<(
         .ok_or(EngineError::RelationshipNotFound(id))
 }
 
+/// `entity_from_row`'s expected 5 columns, joined against `entity_hidden`
+/// so `Entity::hidden` comes back populated wherever an entity is loaded —
+/// column names never collide (`entity_hidden` has no `id`), so no
+/// table-qualification is needed beyond the join condition itself.
+const ENTITY_SELECT: &str = "SELECT id, entity_type, canonical_key, display_label, hidden_at
+     FROM entities LEFT JOIN entity_hidden ON entity_hidden.entity_id = entities.id";
+
 pub(crate) fn get_entity(conn: &Connection, id: EntityId) -> Result<Entity, EngineError> {
     conn.query_row(
-        "SELECT id, entity_type, canonical_key, display_label FROM entities WHERE id = ?1",
+        &format!("{ENTITY_SELECT} WHERE id = ?1"),
         params![id.0.to_string()],
         entity_from_row,
     )
@@ -80,8 +93,7 @@ pub(crate) fn find_entity_by_key(
     key: &str,
 ) -> Result<Option<Entity>, EngineError> {
     conn.query_row(
-        "SELECT id, entity_type, canonical_key, display_label FROM entities
-         WHERE entity_type = ?1 AND canonical_key = ?2",
+        &format!("{ENTITY_SELECT} WHERE entity_type = ?1 AND canonical_key = ?2"),
         params![entity_type.to_string(), normalize_key(key)],
         entity_from_row,
     )
@@ -93,11 +105,15 @@ pub(crate) fn list_entities(
     conn: &Connection,
     filter: EntityFilter,
 ) -> Result<Vec<Entity>, EngineError> {
-    const BASE: &str = "SELECT id, entity_type, canonical_key, display_label FROM entities";
+    let hidden_clause = if filter.include_hidden {
+        ""
+    } else {
+        "hidden_at IS NULL AND "
+    };
     let rows: Vec<Entity> = match filter.entity_type {
         Some(entity_type) => {
             let mut stmt = conn.prepare(&format!(
-                "{BASE} WHERE entity_type = ?1 ORDER BY created_at"
+                "{ENTITY_SELECT} WHERE {hidden_clause}entity_type = ?1 ORDER BY created_at"
             ))?;
             let mapped = stmt
                 .query_map(params![entity_type.to_string()], entity_from_row)?
@@ -105,7 +121,14 @@ pub(crate) fn list_entities(
             mapped
         }
         None => {
-            let mut stmt = conn.prepare(&format!("{BASE} ORDER BY created_at"))?;
+            let where_clause = if filter.include_hidden {
+                String::new()
+            } else {
+                "WHERE hidden_at IS NULL ".to_string()
+            };
+            let mut stmt = conn.prepare(&format!(
+                "{ENTITY_SELECT} {where_clause}ORDER BY created_at"
+            ))?;
             let mapped = stmt
                 .query_map([], entity_from_row)?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -642,6 +665,84 @@ pub(crate) fn split_entity(
     Ok(EntityId(new_id))
 }
 
+/// Reversibly dismisses an entity (issue #9) — e.g. a false-positive
+/// `OnlineAccount` finding from a large `sites.toml` scan — without
+/// deleting anything. Unlike `redact_fact`, this is not a real DELETE: a
+/// full entity erasure would need to decide what happens across six
+/// tables that reference `entities` (`facts`, `entity_attributes`,
+/// `entity_images`, `entity_positions`, `relationships` from/to,
+/// `scans.target_entity_id`) with nowhere to re-point them the way
+/// `merge_entities` does — hiding sidesteps that entirely by leaving
+/// every row in place and just filtering the entity out of list queries
+/// (`list_entities`/`list_relationships`) by default.
+///
+/// Idempotent: hiding an already-hidden entity just updates `hidden_at`/
+/// `reason` (INSERT OR REPLACE) rather than erroring — a double-click in
+/// the GUI shouldn't be a failure case. Still records its own
+/// `audit_events` row each time, same as `merge`/`split`.
+pub(crate) fn hide_entity(
+    conn: &mut Connection,
+    id: EntityId,
+    actor: Actor,
+    reason: Option<&str>,
+) -> Result<(), EngineError> {
+    let tx = conn.transaction()?;
+    ensure_entity_exists(&tx, id)?;
+
+    let id_str = id.0.to_string();
+    let now = now_unix_ms();
+    tx.execute(
+        "INSERT OR REPLACE INTO entity_hidden (entity_id, hidden_at, reason) VALUES (?1, ?2, ?3)",
+        params![id_str, now, reason],
+    )?;
+
+    let description = match reason {
+        Some(reason) => format!("hid entity {id} — reason: {reason}"),
+        None => format!("hid entity {id}"),
+    };
+    tx.execute(
+        "INSERT INTO audit_events (id, entity_id, relationship_id, event_type, description, actor, occurred_at)
+         VALUES (?1, ?2, NULL, 'hide', ?3, ?4, ?5)",
+        params![Uuid::new_v4().to_string(), id_str, description, actor.name, now],
+    )?;
+
+    tx.commit()?;
+    Ok(())
+}
+
+/// Reverses [`hide_entity`]. A no-op (not an error) on an entity that
+/// wasn't hidden — same idempotency reasoning as `hide_entity` itself.
+pub(crate) fn unhide_entity(
+    conn: &mut Connection,
+    id: EntityId,
+    actor: Actor,
+) -> Result<(), EngineError> {
+    let tx = conn.transaction()?;
+    ensure_entity_exists(&tx, id)?;
+
+    let id_str = id.0.to_string();
+    tx.execute(
+        "DELETE FROM entity_hidden WHERE entity_id = ?1",
+        params![id_str],
+    )?;
+
+    let now = now_unix_ms();
+    tx.execute(
+        "INSERT INTO audit_events (id, entity_id, relationship_id, event_type, description, actor, occurred_at)
+         VALUES (?1, ?2, NULL, 'unhide', ?3, ?4, ?5)",
+        params![
+            Uuid::new_v4().to_string(),
+            id_str,
+            format!("unhid entity {id}"),
+            actor.name,
+            now,
+        ],
+    )?;
+
+    tx.commit()?;
+    Ok(())
+}
+
 /// Permanently deletes a fact and its attribute row(s) (SPEC.md §8 open
 /// question 4, now resolved): true deletion, not crypto-shredding — the
 /// `facts` table's append-only-ness exists for investigative integrity
@@ -930,11 +1031,26 @@ fn relationship_from_row(row: &Row) -> rusqlite::Result<Relationship> {
 /// Every relationship in the case, oldest first. Not in SPEC.md §3.1 (no
 /// `relationship list` CLI command exists either) — added purely for
 /// `case export --format report`, which needs the full graph.
-pub(crate) fn list_relationships(conn: &Connection) -> Result<Vec<Relationship>, EngineError> {
-    let mut stmt = conn.prepare(
+///
+/// `include_hidden` mirrors `EntityFilter::include_hidden` (issue #9):
+/// when `false` (the default everywhere except an explicit "show hidden"
+/// view), a relationship is excluded whenever *either* endpoint is
+/// hidden — a hidden entity's edges shouldn't leak into the Link graph
+/// or a report just because the other end is visible.
+pub(crate) fn list_relationships(
+    conn: &Connection,
+    include_hidden: bool,
+) -> Result<Vec<Relationship>, EngineError> {
+    let hidden_clause = if include_hidden {
+        ""
+    } else {
+        "WHERE from_entity_id NOT IN (SELECT entity_id FROM entity_hidden)
+           AND to_entity_id NOT IN (SELECT entity_id FROM entity_hidden) "
+    };
+    let mut stmt = conn.prepare(&format!(
         "SELECT id, from_entity_id, to_entity_id, relationship_type, created_at
-         FROM relationships ORDER BY created_at",
-    )?;
+         FROM relationships {hidden_clause}ORDER BY created_at"
+    ))?;
     let rows = stmt
         .query_map([], relationship_from_row)?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1147,6 +1263,7 @@ mod tests {
             &conn,
             EntityFilter {
                 entity_type: Some(EntityType::Person),
+                ..Default::default()
             },
         )
         .unwrap();
@@ -1752,6 +1869,167 @@ mod tests {
     }
 
     #[test]
+    fn hide_entity_excludes_it_from_list_entities_by_default() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::OnlineAccount,
+            Some("false-positive".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        hide_entity(&mut conn, id, actor(), Some("not actually them")).unwrap();
+
+        let entity = get_entity(&conn, id).unwrap();
+        assert!(entity.hidden);
+
+        let visible = list_entities(&conn, EntityFilter::default()).unwrap();
+        assert!(!visible.iter().any(|e| e.id == id));
+
+        let all = list_entities(
+            &conn,
+            EntityFilter {
+                include_hidden: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(all.iter().any(|e| e.id == id));
+    }
+
+    #[test]
+    fn hide_entity_records_an_audit_event() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::OnlineAccount,
+            Some("false-positive".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        hide_entity(&mut conn, id, actor(), Some("not actually them")).unwrap();
+
+        let events = audit_trail(&conn, AuditTarget::Entity(id)).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "hide");
+        assert_eq!(events[0].actor, "tester");
+        assert!(events[0].description.contains("not actually them"));
+    }
+
+    #[test]
+    fn hide_entity_twice_is_idempotent_not_an_error() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::OnlineAccount,
+            Some("false-positive".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        hide_entity(&mut conn, id, actor(), Some("first reason")).unwrap();
+        hide_entity(&mut conn, id, actor(), Some("second reason")).unwrap();
+
+        assert!(get_entity(&conn, id).unwrap().hidden);
+        // Both hides are still real events — hide isn't collapsed into one row.
+        let events = audit_trail(&conn, AuditTarget::Entity(id)).unwrap();
+        assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn unhide_entity_makes_it_visible_again_and_records_an_audit_event() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::OnlineAccount,
+            Some("false-positive".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        hide_entity(&mut conn, id, actor(), None).unwrap();
+        unhide_entity(&mut conn, id, actor()).unwrap();
+
+        assert!(!get_entity(&conn, id).unwrap().hidden);
+        let visible = list_entities(&conn, EntityFilter::default()).unwrap();
+        assert!(visible.iter().any(|e| e.id == id));
+
+        let events = audit_trail(&conn, AuditTarget::Entity(id)).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[1].event_type, "unhide");
+    }
+
+    #[test]
+    fn unhide_entity_that_was_never_hidden_is_a_no_op() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::OnlineAccount,
+            Some("never-hidden".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        unhide_entity(&mut conn, id, actor()).unwrap();
+        assert!(!get_entity(&conn, id).unwrap().hidden);
+    }
+
+    #[test]
+    fn hide_entity_errors_on_missing_entity() {
+        let mut conn = test_conn();
+        let missing = EntityId(Uuid::new_v4());
+        assert!(matches!(
+            hide_entity(&mut conn, missing, actor(), None).unwrap_err(),
+            EngineError::EntityNotFound(_)
+        ));
+    }
+
+    #[test]
+    fn list_relationships_excludes_an_edge_when_either_endpoint_is_hidden() {
+        let mut conn = test_conn();
+        let a = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let b = add_entity(
+            &mut conn,
+            EntityType::OnlineAccount,
+            Some("false-positive".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        add_relationship(
+            &mut conn,
+            a,
+            b,
+            RelationshipType::Custom("owns".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        hide_entity(&mut conn, b, actor(), None).unwrap();
+
+        let visible = list_relationships(&conn, false).unwrap();
+        assert!(visible.is_empty());
+
+        let all = list_relationships(&conn, true).unwrap();
+        assert_eq!(all.len(), 1);
+    }
+
+    #[test]
     fn redact_fact_deletes_only_the_targeted_facts_attributes() {
         let mut conn = test_conn();
         let id = add_entity(
@@ -2112,7 +2390,7 @@ mod tests {
         )
         .unwrap();
 
-        let rels = list_relationships(&conn).unwrap();
+        let rels = list_relationships(&conn, false).unwrap();
         assert_eq!(rels.len(), 1);
         assert_eq!(rels[0].id, rel_id);
         assert_eq!(rels[0].from, a);
