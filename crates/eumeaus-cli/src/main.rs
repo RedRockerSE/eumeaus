@@ -144,6 +144,10 @@ enum EntityCmd {
         entity_type: Option<String>,
         #[arg(long)]
         filter: Option<String>,
+        /// Also list entities dismissed via `entity hide` (issue #9) —
+        /// excluded by default.
+        #[arg(long)]
+        include_hidden: bool,
     },
     Show {
         id: String,
@@ -151,6 +155,17 @@ enum EntityCmd {
     Merge {
         id1: String,
         id2: String,
+    },
+    /// Reversibly dismiss an entity (e.g. a false-positive scan finding)
+    /// without deleting anything — see `entity list --include-hidden` to
+    /// see it again, or `entity unhide` to reverse it.
+    Hide {
+        id: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    Unhide {
+        id: String,
     },
     Split {
         id: String,
@@ -522,18 +537,24 @@ fn run(cli: Cli) -> Result<(), CliError> {
                 println!("{id}");
                 Ok(())
             }
-            EntityCmd::List { entity_type, .. } => {
+            EntityCmd::List {
+                entity_type,
+                include_hidden,
+                ..
+            } => {
                 let case = require_case(&cli.case)?;
                 let entities = case.list_entities(EntityFilter {
                     entity_type: entity_type.map(|t| EntityType::from_str(&t).expect("infallible")),
+                    include_hidden,
                 })?;
                 for entity in entities {
                     println!(
-                        "{}\t{}\t{}\t{}",
+                        "{}\t{}\t{}\t{}{}",
                         entity.id,
                         entity.entity_type,
                         entity.canonical_key.as_deref().unwrap_or("-"),
                         entity.display_label,
+                        if entity.hidden { "\t(hidden)" } else { "" },
                     );
                 }
                 Ok(())
@@ -577,6 +598,16 @@ fn run(cli: Cli) -> Result<(), CliError> {
                     default_actor(),
                 )?;
                 println!("{survivor}");
+                Ok(())
+            }
+            EntityCmd::Hide { id, reason } => {
+                let mut case = require_case(&cli.case)?;
+                case.hide_entity(parse_entity_id(&id)?, default_actor(), reason.as_deref())?;
+                Ok(())
+            }
+            EntityCmd::Unhide { id } => {
+                let mut case = require_case(&cli.case)?;
+                case.unhide_entity(parse_entity_id(&id)?, default_actor())?;
                 Ok(())
             }
             EntityCmd::Split {

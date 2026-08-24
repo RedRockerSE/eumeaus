@@ -15,6 +15,7 @@ import {
   entityAddImage,
   entityAudit,
   entityGetImage,
+  entityHide,
   entityList,
   entityListDocuments,
   entityListImages,
@@ -22,6 +23,7 @@ import {
   entityOpenDocument,
   entityShow,
   entitySplit,
+  entityUnhide,
   factRedact,
   relationshipAdd,
   relationshipList,
@@ -36,6 +38,7 @@ const CUSTOM_REL_TYPE = "__custom__";
 export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChanged: () => void }) {
   const [entities, setEntities] = useState<EntitySummary[] | null>(null);
   const [typeFilter, setTypeFilter] = useState("All");
+  const [showHidden, setShowHidden] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<EntityDetail | null>(null);
@@ -54,6 +57,9 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
 
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeOther, setMergeOther] = useState("");
+
+  const [hideOpen, setHideOpen] = useState(false);
+  const [hideReason, setHideReason] = useState("");
 
   const [splitMode, setSplitMode] = useState(false);
   const [splitFactIds, setSplitFactIds] = useState<Set<string>>(new Set());
@@ -79,7 +85,7 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
   async function refresh() {
     setError(null);
     try {
-      const list = await entityList(typeFilter === "All" ? null : typeFilter);
+      const list = await entityList(typeFilter === "All" ? null : typeFilter, showHidden);
       setEntities(list);
     } catch (e) {
       setError(String(e));
@@ -89,7 +95,7 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeFilter]);
+  }, [typeFilter, showHidden]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -163,6 +169,8 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
     setSplitMode(false);
     setSplitFactIds(new Set());
     setMergeOpen(false);
+    setHideOpen(false);
+    setHideReason("");
     setAddFactOpen(false);
     setRelToId("");
     setDocuments(null);
@@ -205,6 +213,37 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
       await refresh();
       onEntitiesChanged();
       selectEntity(survivor.id);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function doHide(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedId) return;
+    setError(null);
+    try {
+      await entityHide(selectedId, hideReason.trim() || null);
+      setHideOpen(false);
+      setHideReason("");
+      await refresh();
+      const detail = await entityShow(selectedId);
+      setSelected(detail);
+      onEntitiesChanged();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function doUnhide() {
+    if (!selectedId) return;
+    setError(null);
+    try {
+      await entityUnhide(selectedId);
+      await refresh();
+      const detail = await entityShow(selectedId);
+      setSelected(detail);
+      onEntitiesChanged();
     } catch (e) {
       setError(String(e));
     }
@@ -380,6 +419,14 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
               </button>
             ))}
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
+            <input
+              type="checkbox"
+              checked={showHidden}
+              onChange={(e) => setShowHidden(e.currentTarget.checked)}
+            />
+            Show hidden
+          </label>
         </div>
 
         {addOpen && (
@@ -443,6 +490,11 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {e.display_label}
+                    {e.hidden && (
+                      <span className="mono" style={{ marginLeft: 6, fontSize: 10, color: "var(--text-faint)" }}>
+                        (hidden)
+                      </span>
+                    )}
                   </div>
                   <div className="mono" style={{ fontSize: 10.5, color: "var(--text-mono-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {e.canonical_key ?? "—"}
@@ -484,6 +536,11 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                     <span className="status-pill" style={{ background: "#24242e", color: "var(--text-muted)" }}>
                       {selected.entity_type}
                     </span>
+                    {selected.hidden && (
+                      <span className="status-pill" style={{ background: "rgba(217,161,59,0.15)", color: "var(--warn)", borderColor: "rgba(217,161,59,0.35)" }}>
+                        hidden
+                      </span>
+                    )}
                   </div>
                   <div className="mono" style={{ fontSize: 11, color: "var(--text-mono-muted)", marginTop: 4 }}>
                     {selected.id}
@@ -505,6 +562,15 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                   <button className="btn" onClick={() => setMergeOpen((v) => !v)}>
                     Merge…
                   </button>
+                  {selected.hidden ? (
+                    <button className="btn" onClick={doUnhide}>
+                      Unhide
+                    </button>
+                  ) : (
+                    <button className="btn" onClick={() => setHideOpen((v) => !v)}>
+                      Hide…
+                    </button>
+                  )}
                   <button
                     className={"btn" + (splitMode ? " btn-primary" : "")}
                     onClick={() => {
@@ -565,6 +631,20 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                   />
                   <button type="submit" className="btn btn-primary">
                     Merge
+                  </button>
+                </form>
+              )}
+
+              {hideOpen && (
+                <form className="row" style={{ marginBottom: 14 }} onSubmit={doHide}>
+                  <input
+                    style={{ flex: 1 }}
+                    value={hideReason}
+                    onChange={(e) => setHideReason(e.currentTarget.value)}
+                    placeholder="Reason (optional)"
+                  />
+                  <button type="submit" className="btn btn-primary">
+                    Hide
                   </button>
                 </form>
               )}

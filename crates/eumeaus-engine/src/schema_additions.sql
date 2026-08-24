@@ -37,6 +37,17 @@ CREATE TABLE IF NOT EXISTS entity_positions (
     y REAL NOT NULL
 );
 
+-- Entity hide/unhide (issue #9): a reversible dismiss for false-positive
+-- findings, deliberately not a real DELETE — see crud::hide_entity's doc
+-- comment for why. Row present = hidden; absent = visible. `reason` is
+-- optional (unlike fact redact's mandatory one) since the motivating
+-- workflow is bulk-dismissing several scan false positives at once.
+CREATE TABLE IF NOT EXISTS entity_hidden (
+    entity_id TEXT PRIMARY KEY REFERENCES entities (id),
+    hidden_at INTEGER NOT NULL,
+    reason TEXT
+);
+
 -- Issue #10: the document-upload equivalent of entity_images (phase one
 -- of entity image upload) — same shape, plus file_name since documents
 -- are a named list, not a picture grid.

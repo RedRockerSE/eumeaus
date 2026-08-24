@@ -301,6 +301,8 @@ pub struct Actor {
 #[derive(Debug, Clone, Default)]
 pub struct EntityFilter {
     pub entity_type: Option<EntityType>,
+    /// When `false` (the default), hidden entities (issue #9) are excluded.
+    pub include_hidden: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -309,6 +311,7 @@ pub struct Entity {
     pub entity_type: EntityType,
     pub canonical_key: Option<String>,
     pub display_label: String,
+    pub hidden: bool,
 }
 
 pub enum AuditTarget {

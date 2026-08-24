@@ -501,6 +501,22 @@ impl Case {
         crud::redact_fact(&mut self.conn, fact_id, actor, reason)
     }
 
+    /// Reversibly dismisses an entity (issue #9) — see
+    /// `crud::hide_entity`'s doc comment for why this isn't a real delete.
+    pub fn hide_entity(
+        &mut self,
+        id: EntityId,
+        actor: Actor,
+        reason: Option<&str>,
+    ) -> Result<(), EngineError> {
+        crud::hide_entity(&mut self.conn, id, actor, reason)
+    }
+
+    /// Reverses [`Case::hide_entity`].
+    pub fn unhide_entity(&mut self, id: EntityId, actor: Actor) -> Result<(), EngineError> {
+        crud::unhide_entity(&mut self.conn, id, actor)
+    }
+
     pub fn add_relationship(
         &mut self,
         from: EntityId,
@@ -554,8 +570,11 @@ impl Case {
     /// Not in SPEC.md §3.1 (no `relationship list` CLI command exists
     /// either — see `crud::list_relationships`'s own doc); added for the
     /// GUI's Graph screen (SPEC.md §9.3), which needs the full graph.
-    pub fn list_relationships(&self) -> Result<Vec<Relationship>, EngineError> {
-        crud::list_relationships(&self.conn)
+    pub fn list_relationships(
+        &self,
+        include_hidden: bool,
+    ) -> Result<Vec<Relationship>, EngineError> {
+        crud::list_relationships(&self.conn, include_hidden)
     }
 
     /// Case-wide counts for the GUI's Overview screen (SPEC.md §9.3).
@@ -734,7 +753,10 @@ fn export_sqlite(conn: &Connection, dest: &Path, key: &str) -> Result<(), Engine
 
 /// A JSON dump of the full entity/relationship graph, each with its
 /// attribute facts and audit trail — everything `entity show`/`audit show`
-/// can print, gathered case-wide into one file.
+/// can print, gathered case-wide into one file. `include_hidden: true`
+/// throughout — a case archive shouldn't silently drop hidden entities
+/// (issue #9) the way interactive browsing does by default; hiding is a
+/// dismiss-from-view, not a redaction.
 fn export_report(case: &Case, dest: &Path) -> Result<(), EngineError> {
     let attrs_json = |attrs: &[AttributeRecord]| -> serde_json::Value {
         attrs
@@ -768,7 +790,13 @@ fn export_report(case: &Case, dest: &Path) -> Result<(), EngineError> {
     };
 
     let mut entities_json = Vec::new();
-    for entity in crud::list_entities(&case.conn, EntityFilter::default())? {
+    for entity in crud::list_entities(
+        &case.conn,
+        EntityFilter {
+            include_hidden: true,
+            ..Default::default()
+        },
+    )? {
         let attrs = crud::list_attribute_records(&case.conn, entity.id)?;
         let audit = crud::audit_trail(&case.conn, AuditTarget::Entity(entity.id))?;
         entities_json.push(serde_json::json!({
@@ -782,7 +810,7 @@ fn export_report(case: &Case, dest: &Path) -> Result<(), EngineError> {
     }
 
     let mut relationships_json = Vec::new();
-    for rel in crud::list_relationships(&case.conn)? {
+    for rel in crud::list_relationships(&case.conn, true)? {
         let attrs = crud::list_relationship_attribute_records(&case.conn, rel.id)?;
         let audit = crud::audit_trail(&case.conn, AuditTarget::Relationship(rel.id))?;
         relationships_json.push(serde_json::json!({
@@ -847,7 +875,13 @@ fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
     ));
 
     html.push_str("<h2>Entities</h2>\n");
-    let entities = crud::list_entities(&case.conn, EntityFilter::default())?;
+    let entities = crud::list_entities(
+        &case.conn,
+        EntityFilter {
+            include_hidden: true,
+            ..Default::default()
+        },
+    )?;
     if entities.is_empty() {
         html.push_str("<p><em>None.</em></p>\n");
     }
@@ -905,7 +939,7 @@ fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
     }
 
     html.push_str("<h2>Relationships</h2>\n");
-    let relationships = crud::list_relationships(&case.conn)?;
+    let relationships = crud::list_relationships(&case.conn, true)?;
     if relationships.is_empty() {
         html.push_str("<p><em>None.</em></p>\n");
     } else {
@@ -1329,6 +1363,7 @@ mod tests {
         let entities = imported
             .list_entities(EntityFilter {
                 entity_type: Some(EntityType::Username),
+                ..Default::default()
             })
             .unwrap();
         assert_eq!(entities.len(), 1);
