@@ -1370,7 +1370,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-cli"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "assert_cmd",
  "async-trait",
@@ -1392,7 +1392,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-crypto-wallet-plugin"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "eumeaus-plugin-protocol",
@@ -1408,7 +1408,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-domain-lookup-plugin"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "eumeaus-plugin-protocol",
@@ -1424,7 +1424,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-email-lookup-plugin"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "eumeaus-plugin-protocol",
@@ -1442,7 +1442,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-engine"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "ed25519-dalek",
@@ -1463,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-gui"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.23.1",
  "dirs 5.0.1",
@@ -1486,7 +1486,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-ip-lookup-plugin"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "eumeaus-plugin-protocol",
@@ -1502,7 +1502,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-plugin-host"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -1528,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-plugin-protocol"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "prost",
  "protoc-bin-vendored",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-plugin-sdk"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "eumeaus-plugin-protocol",
@@ -1550,7 +1550,7 @@ dependencies = [
 
 [[package]]
 name = "eumeaus-username-search-plugin"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "eumeaus-plugin-protocol",
