@@ -14,9 +14,9 @@ use uuid::Uuid;
 
 use crate::{
     now_unix_ms, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, ConfidenceStatus,
-    EngineError, Entity, EntityFilter, EntityId, EntityImageData, EntityImageSummary,
-    EntityPosition, EntityType, FactId, ImageId, Provenance, Relationship, RelationshipId,
-    RelationshipType,
+    DocumentId, EngineError, Entity, EntityDocumentData, EntityDocumentSummary, EntityFilter,
+    EntityId, EntityImageData, EntityImageSummary, EntityPosition, EntityType, FactId, ImageId,
+    Provenance, Relationship, RelationshipId, RelationshipType,
 };
 
 fn normalize_key(raw: &str) -> String {
@@ -454,6 +454,117 @@ pub(crate) fn get_entity_image(
     .ok_or(EngineError::ImageNotFound(image_id))
 }
 
+/// Attaches a document to an existing entity (issue #10) — the
+/// document-upload equivalent of [`add_image_to_entity`]: one new fact
+/// carrying `provenance`, plus one `entity_documents` row tied to it.
+/// Works on any `entity_id`, same as `add_image_to_entity`/
+/// `add_fact_to_entity`.
+pub(crate) fn add_document_to_entity(
+    conn: &mut Connection,
+    entity_id: EntityId,
+    file_name: String,
+    mime_type: String,
+    data: Vec<u8>,
+    provenance: Provenance,
+) -> Result<FactId, EngineError> {
+    let now = now_unix_ms();
+    let tx = conn.transaction()?;
+    ensure_entity_exists(&tx, entity_id)?;
+
+    tx.execute(
+        "UPDATE entities SET updated_at = ?1 WHERE id = ?2",
+        params![now, entity_id.0.to_string()],
+    )?;
+
+    let fact_id = Uuid::new_v4();
+    tx.execute(
+        "INSERT INTO facts
+            (id, entity_id, relationship_id, scan_id, source, source_version,
+             confidence_status, source_url, retrieval_method, raw_response_sha256, collected_at)
+         VALUES (?1, ?2, NULL, NULL, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            fact_id.to_string(),
+            entity_id.0.to_string(),
+            provenance.source,
+            provenance.source_version,
+            ConfidenceStatus::Found.to_string(),
+            provenance.source_url,
+            provenance.retrieval_method,
+            provenance.raw_response_sha256,
+            provenance.collected_at_unix_ms,
+        ],
+    )?;
+
+    tx.execute(
+        "INSERT INTO entity_documents (id, entity_id, fact_id, file_name, mime_type, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            Uuid::new_v4().to_string(),
+            entity_id.0.to_string(),
+            fact_id.to_string(),
+            file_name,
+            mime_type,
+            data,
+        ],
+    )?;
+
+    tx.commit()?;
+    Ok(FactId(fact_id))
+}
+
+/// Metadata (no BLOB) for every document on an entity, newest first. No
+/// `is_current` — unlike images there's no "current profile picture"
+/// concept for documents, every one just stays listed (SPEC.md-style
+/// "nothing is ever hidden", same spirit as [`list_entity_images`] minus
+/// the gallery framing).
+pub(crate) fn list_entity_documents(
+    conn: &Connection,
+    entity_id: EntityId,
+) -> Result<Vec<EntityDocumentSummary>, EngineError> {
+    ensure_entity_exists(conn, entity_id)?;
+    let mut stmt = conn.prepare(
+        "SELECT d.id, d.fact_id, d.file_name, d.mime_type, LENGTH(d.data), f.collected_at
+         FROM entity_documents d JOIN facts f ON f.id = d.fact_id
+         WHERE d.entity_id = ?1
+         ORDER BY f.collected_at DESC",
+    )?;
+    let rows = stmt
+        .query_map(params![entity_id.0.to_string()], |row| {
+            let id: String = row.get(0)?;
+            let fact_id: String = row.get(1)?;
+            Ok(EntityDocumentSummary {
+                id: DocumentId(Uuid::parse_str(&id).expect("stored document id is a valid uuid")),
+                fact_id: FactId(Uuid::parse_str(&fact_id).expect("stored fact id is a valid uuid")),
+                file_name: row.get(2)?,
+                mime_type: row.get(3)?,
+                size_bytes: row.get(4)?,
+                collected_at_unix_ms: row.get(5)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
+/// The bytes for one document, fetched by its own id (not `fact_id` —
+/// same reasoning as `get_entity_image`).
+pub(crate) fn get_entity_document(
+    conn: &Connection,
+    document_id: DocumentId,
+) -> Result<EntityDocumentData, EngineError> {
+    conn.query_row(
+        "SELECT file_name, mime_type, data FROM entity_documents WHERE id = ?1",
+        params![document_id.0.to_string()],
+        |row| {
+            Ok(EntityDocumentData {
+                file_name: row.get(0)?,
+                mime_type: row.get(1)?,
+                data: row.get(2)?,
+            })
+        },
+    )
+    .optional()?
+    .ok_or(EngineError::DocumentNotFound(document_id))
+}
+
 /// Upserts the dragged position for one entity in the Link graph. `x`/`y`
 /// are opaque SVG user-space coordinates as the GUI defines them — the
 /// engine doesn't interpret them, just stores the last one it was given.
@@ -789,6 +900,10 @@ pub(crate) fn redact_fact(
     )?;
     tx.execute(
         "DELETE FROM entity_images WHERE fact_id = ?1",
+        params![fact_id.0.to_string()],
+    )?;
+    tx.execute(
+        "DELETE FROM entity_documents WHERE fact_id = ?1",
         params![fact_id.0.to_string()],
     )?;
     tx.execute(
@@ -1426,6 +1541,135 @@ mod tests {
 
         let err = get_entity_image(&conn, bogus).unwrap_err();
         assert!(matches!(err, EngineError::ImageNotFound(_)));
+    }
+
+    #[test]
+    fn add_document_to_entity_attaches_a_document_and_creates_a_fact() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("dave".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let fact_id = add_document_to_entity(
+            &mut conn,
+            id,
+            "notes.txt".to_string(),
+            "text/plain".to_string(),
+            vec![1, 2, 3, 4],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let docs = list_entity_documents(&conn, id).unwrap();
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs[0].fact_id, fact_id);
+        assert_eq!(docs[0].file_name, "notes.txt");
+        assert_eq!(docs[0].mime_type, "text/plain");
+        assert_eq!(docs[0].size_bytes, 4);
+
+        let data = get_entity_document(&conn, docs[0].id).unwrap();
+        assert_eq!(data.file_name, "notes.txt");
+        assert_eq!(data.mime_type, "text/plain");
+        assert_eq!(data.data, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn add_document_to_entity_works_on_a_keyless_entity() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        add_document_to_entity(
+            &mut conn,
+            id,
+            "report.pdf".to_string(),
+            "application/pdf".to_string(),
+            vec![9, 9],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let docs = list_entity_documents(&conn, id).unwrap();
+        assert_eq!(docs.len(), 1);
+    }
+
+    #[test]
+    fn add_document_to_entity_errors_on_an_unknown_entity() {
+        let mut conn = test_conn();
+        let bogus = EntityId(Uuid::new_v4());
+
+        let err = add_document_to_entity(
+            &mut conn,
+            bogus,
+            "notes.txt".to_string(),
+            "text/plain".to_string(),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, EngineError::EntityNotFound(_)));
+    }
+
+    #[test]
+    fn list_entity_documents_orders_newest_first_and_never_hides_one() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("erin".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let mut older = test_provenance();
+        older.collected_at_unix_ms = 1000;
+        let older_fact = add_document_to_entity(
+            &mut conn,
+            id,
+            "old.txt".to_string(),
+            "text/plain".to_string(),
+            vec![1],
+            older,
+        )
+        .unwrap();
+
+        let mut newer = test_provenance();
+        newer.collected_at_unix_ms = 2000;
+        let newer_fact = add_document_to_entity(
+            &mut conn,
+            id,
+            "new.pdf".to_string(),
+            "application/pdf".to_string(),
+            vec![2],
+            newer,
+        )
+        .unwrap();
+
+        let docs = list_entity_documents(&conn, id).unwrap();
+        assert_eq!(docs.len(), 2, "no document is ever superseded, it's a list");
+        assert_eq!(docs[0].fact_id, newer_fact);
+        assert_eq!(docs[1].fact_id, older_fact);
+    }
+
+    #[test]
+    fn get_entity_document_errors_on_an_unknown_document_id() {
+        let conn = test_conn();
+        let bogus = crate::DocumentId(Uuid::new_v4());
+
+        let err = get_entity_document(&conn, bogus).unwrap_err();
+        assert!(matches!(err, EngineError::DocumentNotFound(_)));
     }
 
     #[test]
@@ -2131,6 +2375,40 @@ mod tests {
             !events[0].description.contains("image/png"),
             "the audit trail must not need to carry image content"
         );
+    }
+
+    #[test]
+    fn redact_fact_deletes_the_associated_document_too() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let fact_id = add_document_to_entity(
+            &mut conn,
+            id,
+            "notes.txt".to_string(),
+            "text/plain".to_string(),
+            vec![1, 2, 3],
+            test_provenance(),
+        )
+        .unwrap();
+
+        redact_fact(&mut conn, fact_id, actor(), "wrong document uploaded").unwrap();
+
+        assert!(list_entity_documents(&conn, id).unwrap().is_empty());
+        let fact_count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM facts WHERE id = ?1",
+                params![fact_id.0.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fact_count, 0);
     }
 
     #[test]

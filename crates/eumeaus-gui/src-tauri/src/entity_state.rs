@@ -22,8 +22,8 @@ use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use eumeaus_engine::{
-    Actor, Attribute, Case, EntityFilter, EntityId, EntityPosition, EntityType, FactId, ImageId,
-    Provenance, Relationship, RelationshipType,
+    Actor, Attribute, Case, DocumentId, EntityFilter, EntityId, EntityPosition, EntityType, FactId,
+    ImageId, Provenance, Relationship, RelationshipType,
 };
 use serde::{Deserialize, Serialize};
 
@@ -163,6 +163,33 @@ impl From<eumeaus_engine::EntityImageData> for EntityImageDataDto {
     }
 }
 
+// No data-carrying Dto counterpart to EntityImageDataDto: a document's
+// bytes never cross the JS<->Rust IPC boundary at all (issue #10) —
+// entity_open_document writes them straight to a temp file and opens it
+// server-side, so there's nothing to base64-encode for the frontend.
+#[derive(Serialize, Debug)]
+pub struct EntityDocumentSummaryDto {
+    pub id: String,
+    pub fact_id: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub size_bytes: i64,
+    pub collected_at_unix_ms: i64,
+}
+
+impl From<eumeaus_engine::EntityDocumentSummary> for EntityDocumentSummaryDto {
+    fn from(d: eumeaus_engine::EntityDocumentSummary) -> Self {
+        EntityDocumentSummaryDto {
+            id: d.id.to_string(),
+            fact_id: d.fact_id.to_string(),
+            file_name: d.file_name,
+            mime_type: d.mime_type,
+            size_bytes: d.size_bytes,
+            collected_at_unix_ms: d.collected_at_unix_ms,
+        }
+    }
+}
+
 // Bounded to what the picker's own filter already allows (see
 // pickers.ts's pickImageFile) — a fixed, known set, so a real
 // content-sniffing dependency (mime_guess et al.) would be solving a
@@ -187,6 +214,25 @@ fn mime_type_for_extension(path: &Path) -> Result<&'static str, String> {
 // full-resolution photo gallery would need a different transport
 // (Tauri's asset protocol) and is out of scope here.
 const MAX_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+
+// A fixed allowlist, same as mime_type_for_extension — "could be changed
+// later" per issue #10, not content-sniffed.
+fn document_mime_type_for_extension(path: &Path) -> Result<&'static str, String> {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("txt") => Ok("text/plain"),
+        Some("pdf") => Ok("application/pdf"),
+        _ => Err("unsupported document type — expected .txt or .pdf".to_string()),
+    }
+}
+
+// PDFs can legitimately run larger than an avatar-shaped image — a
+// separate, bigger cap than MAX_IMAGE_BYTES rather than reusing it.
+const MAX_DOCUMENT_BYTES: u64 = 25 * 1024 * 1024;
 
 const NO_CASE_OPEN: &str = "no case is currently open — open a case first";
 
@@ -340,6 +386,136 @@ fn do_entity_get_image(
     );
     case.get_entity_image(image_id)
         .map(EntityImageDataDto::from)
+        .map_err(|e| e.to_string())
+}
+
+/// Attaches a document to an entity (issue #10) — same pattern as
+/// `do_entity_add_image`: `path` comes from the native picker
+/// (`pickDocumentFile()`), read server-side. The original file's own
+/// name (not the full picked path) becomes `file_name`.
+fn do_entity_add_document(
+    cell: &Arc<Mutex<Option<Case>>>,
+    id: &str,
+    path: &Path,
+) -> Result<EntityDocumentSummaryDto, String> {
+    let entity_id = EntityId(id.parse().map_err(|e| format!("invalid entity id: {e}"))?);
+    let mime_type = document_mime_type_for_extension(path)?;
+    let file_name = path
+        .file_name()
+        .and_then(|f| f.to_str())
+        .ok_or("document path has no file name")?
+        .to_string();
+
+    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
+    if size > MAX_DOCUMENT_BYTES {
+        return Err(format!(
+            "document is too large ({:.1} MiB, max {} MiB)",
+            size as f64 / (1024.0 * 1024.0),
+            MAX_DOCUMENT_BYTES / (1024 * 1024),
+        ));
+    }
+    let data = std::fs::read(path).map_err(|e| e.to_string())?;
+
+    let mut guard = cell.lock().unwrap();
+    let case = guard.as_mut().ok_or(NO_CASE_OPEN)?;
+    case.add_document_to_entity(
+        entity_id,
+        file_name,
+        mime_type.to_string(),
+        data,
+        manual_provenance(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Newest first, and this is the upload that was just committed —
+    // no `is_current` flag to filter on (documents aren't a gallery),
+    // so the first row is simply it.
+    case.list_entity_documents(entity_id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .next()
+        .map(EntityDocumentSummaryDto::from)
+        .ok_or_else(|| "document uploaded but not found on re-list".to_string())
+}
+
+fn do_entity_list_documents(
+    cell: &Arc<Mutex<Option<Case>>>,
+    id: &str,
+) -> Result<Vec<EntityDocumentSummaryDto>, String> {
+    let guard = cell.lock().unwrap();
+    let case = guard.as_ref().ok_or(NO_CASE_OPEN)?;
+    let entity_id = EntityId(id.parse().map_err(|e| format!("invalid entity id: {e}"))?);
+    case.list_entity_documents(entity_id)
+        .map(|docs| {
+            docs.into_iter()
+                .map(EntityDocumentSummaryDto::from)
+                .collect()
+        })
+        .map_err(|e| e.to_string())
+}
+
+// Strips any directory components (including a maliciously crafted
+// "../../etc/passwd"-shaped file_name from the case DB) down to the bare
+// file name before it's ever used to build a filesystem path — file_name
+// is stored as-is from the original upload, so this can't be trusted
+// verbatim as a path segment.
+fn safe_temp_file_name(document_id: DocumentId, file_name: &str) -> std::ffi::OsString {
+    let base = Path::new(file_name)
+        .file_name()
+        .map(|f| f.to_os_string())
+        .unwrap_or_else(|| std::ffi::OsString::from("document"));
+    let mut name = std::ffi::OsString::from(format!("{document_id}_"));
+    name.push(base);
+    name
+}
+
+/// Fetches a document's bytes and writes them to a fresh temp file, ready
+/// to hand to the OS's own opener — split out from `do_entity_open_document`
+/// so this half (the part with anything meaningful to assert on) is
+/// testable without a real `tauri::AppHandle`, which nothing in this
+/// crate's test suite constructs.
+fn write_document_to_temp_file(
+    cell: &Arc<Mutex<Option<Case>>>,
+    document_id: &str,
+) -> Result<std::path::PathBuf, String> {
+    let document_id = DocumentId(
+        document_id
+            .parse()
+            .map_err(|e| format!("invalid document id: {e}"))?,
+    );
+
+    let data = {
+        let guard = cell.lock().unwrap();
+        let case = guard.as_ref().ok_or(NO_CASE_OPEN)?;
+        case.get_entity_document(document_id)
+            .map_err(|e| e.to_string())?
+    };
+
+    let temp_path = std::env::temp_dir().join(safe_temp_file_name(document_id, &data.file_name));
+    std::fs::write(&temp_path, &data.data).map_err(|e| e.to_string())?;
+    Ok(temp_path)
+}
+
+/// Writes a document's bytes to a temp file and opens it with the OS
+/// default handler (issue #10) — decided over a Save-As download so a
+/// click is one step, and the OS's own PDF viewer/text editor covers "no
+/// preview needed" for free. Uses `tauri_plugin_opener`'s Rust-side API
+/// directly (`app.opener()...`), not the JS-facing `invoke`d command, so
+/// this needs no IPC scope/capability entry — same reasoning as why this
+/// takes `app: tauri::AppHandle`, following `scan_run`'s existing
+/// precedent for a command that needs plugin access beyond `AppState`.
+/// The temp file is deliberately left behind after opening — the OS app
+/// that just opened it may still be reading it.
+fn do_entity_open_document(
+    app: &tauri::AppHandle,
+    cell: &Arc<Mutex<Option<Case>>>,
+    document_id: &str,
+) -> Result<(), String> {
+    let temp_path = write_document_to_temp_file(cell, document_id)?;
+
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(temp_path.to_string_lossy().to_string(), None::<&str>)
         .map_err(|e| e.to_string())
 }
 
@@ -536,6 +712,43 @@ pub async fn entity_get_image(
 ) -> Result<EntityImageDataDto, String> {
     let cell = state.0.clone();
     tauri::async_runtime::spawn_blocking(move || do_entity_get_image(&cell, &image_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn entity_add_document(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    path: String,
+) -> Result<EntityDocumentSummaryDto, String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        do_entity_add_document(&cell, &id, Path::new(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn entity_list_documents(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<Vec<EntityDocumentSummaryDto>, String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_list_documents(&cell, &id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn entity_open_document(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    document_id: String,
+) -> Result<(), String> {
+    let cell = state.0.clone();
+    tauri::async_runtime::spawn_blocking(move || do_entity_open_document(&app, &cell, &document_id))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1019,6 +1232,146 @@ mod tests {
         );
         assert_eq!(
             do_fact_redact(&cell, "00000000-0000-0000-0000-000000000000", "reason").unwrap_err(),
+            NO_CASE_OPEN
+        );
+    }
+
+    #[test]
+    fn entity_add_document_rejects_an_unsupported_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "g-doc-bad-ext").unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let bad_path = dir.path().join("not-a-document.png");
+        std::fs::write(&bad_path, b"hello").unwrap();
+
+        let err = do_entity_add_document(&cell, "00000000-0000-0000-0000-000000000000", &bad_path)
+            .unwrap_err();
+        assert!(err.contains("unsupported document type"));
+    }
+
+    #[test]
+    fn entity_add_document_rejects_an_oversized_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-doc-too-big").unwrap();
+        let id = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let big_path = dir.path().join("huge.pdf");
+        let oversized = vec![0u8; (MAX_DOCUMENT_BYTES + 1) as usize];
+        std::fs::write(&big_path, &oversized).unwrap();
+
+        let err = do_entity_add_document(&cell, &id.to_string(), &big_path).unwrap_err();
+        assert!(err.contains("too large"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn entity_add_document_round_trips_through_list_and_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-doc-roundtrip").unwrap();
+        let id = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let doc_path = dir.path().join("notes.txt");
+        std::fs::write(&doc_path, b"case notes").unwrap();
+
+        let added = do_entity_add_document(&cell, &id.to_string(), &doc_path).unwrap();
+        assert_eq!(added.mime_type, "text/plain");
+        assert_eq!(added.file_name, "notes.txt");
+
+        let listed = do_entity_list_documents(&cell, &id.to_string()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, added.id);
+
+        let temp_path = write_document_to_temp_file(&cell, &added.id).unwrap();
+        assert_eq!(std::fs::read(&temp_path).unwrap(), b"case notes");
+        assert!(
+            temp_path.file_name().unwrap().to_string_lossy().ends_with("notes.txt"),
+            "temp file should keep the original extension so the OS opener picks the right handler: {temp_path:?}"
+        );
+    }
+
+    #[test]
+    fn write_document_to_temp_file_sanitizes_a_path_traversal_file_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-doc-traversal").unwrap();
+        let id = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        case.add_document_to_entity(
+            id,
+            "../../etc/passwd".to_string(),
+            "text/plain".to_string(),
+            b"not actually passwd".to_vec(),
+            eumeaus_engine::Provenance {
+                source: "user".to_string(),
+                source_version: "0".to_string(),
+                source_url: None,
+                retrieval_method: None,
+                raw_response_sha256: None,
+                collected_at_unix_ms: 0,
+            },
+        )
+        .unwrap();
+        let doc_id = case
+            .list_entity_documents(id)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .id
+            .to_string();
+        let cell = tmp_cell_with_case(case);
+
+        let temp_path = write_document_to_temp_file(&cell, &doc_id).unwrap();
+        assert!(
+            temp_path.starts_with(std::env::temp_dir()),
+            "must stay inside the temp dir, got {temp_path:?}"
+        );
+        assert_eq!(std::fs::read(&temp_path).unwrap(), b"not actually passwd");
+    }
+
+    #[test]
+    fn fact_redact_removes_a_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g-doc-redact").unwrap();
+        let id = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let doc_path = dir.path().join("notes.txt");
+        std::fs::write(&doc_path, b"case notes").unwrap();
+        let added = do_entity_add_document(&cell, &id.to_string(), &doc_path).unwrap();
+
+        do_fact_redact(&cell, &added.fact_id, "wrong document").unwrap();
+
+        let listed = do_entity_list_documents(&cell, &id.to_string()).unwrap();
+        assert!(listed.is_empty());
+    }
+
+    #[test]
+    fn document_commands_error_cleanly_with_no_case_open() {
+        let cell: Arc<Mutex<Option<Case>>> = Arc::new(Mutex::new(None));
+        let dir = tempfile::tempdir().unwrap();
+        let doc_path = dir.path().join("notes.txt");
+        std::fs::write(&doc_path, [1]).unwrap();
+
+        assert_eq!(
+            do_entity_add_document(&cell, "00000000-0000-0000-0000-000000000000", &doc_path)
+                .unwrap_err(),
+            NO_CASE_OPEN
+        );
+        assert_eq!(
+            do_entity_list_documents(&cell, "00000000-0000-0000-0000-000000000000").unwrap_err(),
+            NO_CASE_OPEN
+        );
+        assert_eq!(
+            write_document_to_temp_file(&cell, "00000000-0000-0000-0000-000000000000").unwrap_err(),
             NO_CASE_OPEN
         );
     }

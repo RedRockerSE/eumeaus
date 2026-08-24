@@ -3,20 +3,24 @@ import type {
   AttributeInput,
   AuditEvent,
   EntityDetail,
+  EntityDocumentSummary,
   EntityImageSummary,
   EntitySummary,
   RelationshipDto,
 } from "../api";
 import {
   entityAdd,
+  entityAddDocument,
   entityAddFact,
   entityAddImage,
   entityAudit,
   entityGetImage,
   entityHide,
   entityList,
+  entityListDocuments,
   entityListImages,
   entityMerge,
+  entityOpenDocument,
   entityShow,
   entitySplit,
   entityUnhide,
@@ -26,9 +30,9 @@ import {
 } from "../api";
 import { ENTITY_TYPES, RELATIONSHIP_TYPES, styleForEntityType } from "../entityStyle";
 import EntityPicker from "../components/EntityPicker";
-import { pickImageFile } from "../pickers";
+import { pickDocumentFile, pickImageFile } from "../pickers";
 
-type Tab = "facts" | "links" | "history" | "images";
+type Tab = "facts" | "links" | "history" | "images" | "documents";
 const CUSTOM_REL_TYPE = "__custom__";
 
 export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChanged: () => void }) {
@@ -76,6 +80,8 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
   const [images, setImages] = useState<EntityImageSummary[] | null>(null);
   const [imageDataById, setImageDataById] = useState<Map<string, string>>(new Map());
 
+  const [documents, setDocuments] = useState<EntityDocumentSummary[] | null>(null);
+
   async function refresh() {
     setError(null);
     try {
@@ -112,6 +118,13 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
     if (!selectedId || tab !== "history") return;
     entityAudit(selectedId)
       .then(setHistory)
+      .catch((e) => setError(String(e)));
+  }, [selectedId, tab]);
+
+  useEffect(() => {
+    if (!selectedId || tab !== "documents") return;
+    entityListDocuments(selectedId)
+      .then(setDocuments)
       .catch((e) => setError(String(e)));
   }, [selectedId, tab]);
 
@@ -160,6 +173,7 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
     setHideReason("");
     setAddFactOpen(false);
     setRelToId("");
+    setDocuments(null);
   }
 
   const filtered = (entities ?? []).filter((e) => {
@@ -291,6 +305,43 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
       const list = await entityListImages(selectedId);
       setImages(list);
       onEntitiesChanged();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function addDocument() {
+    if (!selectedId) return;
+    setError(null);
+    try {
+      const path = await pickDocumentFile();
+      if (!path) return; // user cancelled the dialog
+      await entityAddDocument(selectedId, path);
+      const list = await entityListDocuments(selectedId);
+      setDocuments(list);
+      onEntitiesChanged(); // bumps the Overview screen's fact_count
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function removeDocument(doc: EntityDocumentSummary) {
+    if (!selectedId) return;
+    setError(null);
+    try {
+      await factRedact(doc.fact_id, "removed via GUI");
+      const list = await entityListDocuments(selectedId);
+      setDocuments(list);
+      onEntitiesChanged();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function openDocument(doc: EntityDocumentSummary) {
+    setError(null);
+    try {
+      await entityOpenDocument(doc.id);
     } catch (e) {
       setError(String(e));
     }
@@ -505,6 +556,9 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                   <button className="btn" onClick={addImage}>
                     Add image…
                   </button>
+                  <button className="btn" onClick={addDocument}>
+                    Add document…
+                  </button>
                   <button className="btn" onClick={() => setMergeOpen((v) => !v)}>
                     Merge…
                   </button>
@@ -596,7 +650,7 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
               )}
 
               <div className="tabs">
-                {(["facts", "links", "history", "images"] as Tab[]).map((t) => (
+                {(["facts", "links", "history", "images", "documents"] as Tab[]).map((t) => (
                   <button key={t} className={"tab" + (tab === t ? " active" : "")} onClick={() => setTab(t)}>
                     {t[0].toUpperCase() + t.slice(1)}
                   </button>
@@ -801,10 +855,61 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
                   })}
                 </div>
               )}
+
+              {tab === "documents" && (
+                <div className="col" style={{ maxWidth: 720 }}>
+                  {documents && documents.length === 0 && <p className="muted">No documents.</p>}
+                  {documents?.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="card"
+                      style={{ display: "flex", alignItems: "center", gap: 13 }}
+                    >
+                      <div
+                        className="badge"
+                        style={{ background: "#24242e", color: "var(--accent-mid)", flex: "none" }}
+                      >
+                        {doc.mime_type === "application/pdf" ? "PDF" : "TXT"}
+                      </div>
+                      <button
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          textAlign: "left",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "inherit",
+                          font: "inherit",
+                        }}
+                        onClick={() => openDocument(doc)}
+                        title="Open with the default app"
+                      >
+                        <div style={{ fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {doc.file_name}
+                        </div>
+                        <div className="mono" style={{ fontSize: 10.5, color: "var(--text-mono-muted)" }}>
+                          {formatBytes(doc.size_bytes)} ·{" "}
+                          {new Date(doc.collected_at_unix_ms).toISOString().slice(0, 10)}
+                        </div>
+                      </button>
+                      <button className="btn btn-small" onClick={() => removeDocument(doc)}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </>
         )}
       </div>
     </div>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }

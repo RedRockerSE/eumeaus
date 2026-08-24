@@ -47,6 +47,15 @@ export interface EntityImageData {
   data_base64: string;
 }
 
+export interface EntityDocumentSummary {
+  id: string;
+  fact_id: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  collected_at_unix_ms: number;
+}
+
 export interface AttributeInput {
   key: string;
   value: string;
@@ -145,6 +154,12 @@ export const entityListImages = (id: string) =>
   invoke<EntityImageSummary[]>("entity_list_images", { id });
 export const entityGetImage = (imageId: string) =>
   invoke<EntityImageData>("entity_get_image", { imageId });
+export const entityAddDocument = (id: string, path: string) =>
+  invoke<EntityDocumentSummary>("entity_add_document", { id, path });
+export const entityListDocuments = (id: string) =>
+  invoke<EntityDocumentSummary[]>("entity_list_documents", { id });
+export const entityOpenDocument = (documentId: string) =>
+  invoke<void>("entity_open_document", { documentId });
 export const factRedact = (factId: string, reason: string) =>
   invoke<void>("fact_redact", { factId, reason });
 export const relationshipAdd = (
