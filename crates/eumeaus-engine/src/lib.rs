@@ -52,6 +52,8 @@ pub enum EngineError {
     UnknownFact(FactId),
     #[error("image not found: {0}")]
     ImageNotFound(ImageId),
+    #[error("document not found: {0}")]
+    DocumentNotFound(DocumentId),
     #[error("cannot merge an entity with itself: {0}")]
     CannotMergeSelf(EntityId),
     #[error("scan not found: {0}")]
@@ -102,6 +104,7 @@ uuid_id_type!(RelationshipId);
 uuid_id_type!(FactId);
 uuid_id_type!(ScanId);
 uuid_id_type!(ImageId);
+uuid_id_type!(DocumentId);
 
 /// Starter taxonomy per SPEC.md §4.3 (open question: confirm before real
 /// implementation).
@@ -359,6 +362,30 @@ pub struct EntityImageSummary {
 /// image's data just to render metadata.
 #[derive(Debug, Clone)]
 pub struct EntityImageData {
+    pub mime_type: String,
+    pub data: Vec<u8>,
+}
+
+/// Metadata for one document attached to an entity (issue #10) — no BLOB,
+/// same "cheap to list" reasoning as [`EntityImageSummary`]. Unlike
+/// images, there's no `is_current`: documents are a flat named list, not
+/// a gallery with a "current" profile picture, so nothing about a
+/// document is ever superseded by a later one.
+#[derive(Debug, Clone)]
+pub struct EntityDocumentSummary {
+    pub id: DocumentId,
+    pub fact_id: FactId,
+    pub file_name: String,
+    pub mime_type: String,
+    pub size_bytes: i64,
+    pub collected_at_unix_ms: i64,
+}
+
+/// The actual bytes for one document, fetched separately from
+/// [`EntityDocumentSummary`] — same reasoning as [`EntityImageData`].
+#[derive(Debug, Clone)]
+pub struct EntityDocumentData {
+    pub file_name: String,
     pub mime_type: String,
     pub data: Vec<u8>,
 }

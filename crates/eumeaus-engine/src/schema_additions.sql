@@ -36,3 +36,18 @@ CREATE TABLE IF NOT EXISTS entity_positions (
     x REAL NOT NULL,
     y REAL NOT NULL
 );
+
+-- Issue #10: the document-upload equivalent of entity_images (phase one
+-- of entity image upload) — same shape, plus file_name since documents
+-- are a named list, not a picture grid.
+CREATE TABLE IF NOT EXISTS entity_documents (
+    id TEXT PRIMARY KEY,
+    entity_id TEXT NOT NULL REFERENCES entities (id),
+    fact_id TEXT NOT NULL REFERENCES facts (id),
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    data BLOB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS entity_documents_entity_id_idx
+    ON entity_documents (entity_id);

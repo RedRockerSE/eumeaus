@@ -17,9 +17,10 @@ use uuid::Uuid;
 
 use crate::{
     crud, keystore, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, CaseStats,
-    CaseSummary, EngineError, Entity, EntityFilter, EntityId, EntityImageData, EntityImageSummary,
-    EntityPosition, EntityType, FactId, ImageId, PluginRef, Provenance, Relationship,
-    RelationshipId, RelationshipType, ScanConfig, ScanId, ScanStatus, ScanSummary, TargetEntity,
+    CaseSummary, DocumentId, EngineError, Entity, EntityDocumentData, EntityDocumentSummary,
+    EntityFilter, EntityId, EntityImageData, EntityImageSummary, EntityPosition, EntityType,
+    FactId, ImageId, PluginRef, Provenance, Relationship, RelationshipId, RelationshipType,
+    ScanConfig, ScanId, ScanStatus, ScanSummary, TargetEntity,
 };
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
@@ -424,6 +425,38 @@ impl Case {
 
     pub fn get_entity_image(&self, image_id: ImageId) -> Result<EntityImageData, EngineError> {
         crud::get_entity_image(&self.conn, image_id)
+    }
+
+    pub fn add_document_to_entity(
+        &mut self,
+        entity_id: EntityId,
+        file_name: String,
+        mime_type: String,
+        data: Vec<u8>,
+        provenance: Provenance,
+    ) -> Result<FactId, EngineError> {
+        crud::add_document_to_entity(
+            &mut self.conn,
+            entity_id,
+            file_name,
+            mime_type,
+            data,
+            provenance,
+        )
+    }
+
+    pub fn list_entity_documents(
+        &self,
+        entity_id: EntityId,
+    ) -> Result<Vec<EntityDocumentSummary>, EngineError> {
+        crud::list_entity_documents(&self.conn, entity_id)
+    }
+
+    pub fn get_entity_document(
+        &self,
+        document_id: DocumentId,
+    ) -> Result<EntityDocumentData, EngineError> {
+        crud::get_entity_document(&self.conn, document_id)
     }
 
     pub fn set_entity_position(
