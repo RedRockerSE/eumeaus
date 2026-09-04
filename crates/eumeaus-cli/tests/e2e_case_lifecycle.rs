@@ -54,9 +54,15 @@ fn case_create_open_round_trip_and_encryption_at_rest() {
 
     // 3. Prove encryption-at-rest is real, not decorative: plain `sqlite3`
     // must NOT be able to read the case file without the OS-keychain key.
+    //
+    // A real SQL query is used rather than a dot-command (e.g. `.tables`):
+    // on some sqlite3 CLI builds (observed: 3.53.4 on Arch Linux),
+    // `.tables` against an encrypted file exits 0 with no output instead
+    // of surfacing the underlying read error, while a real query reliably
+    // reports it (see GitHub issue #11).
     let sqlite3_result = Command::new("sqlite3")
         .arg(&case_path)
-        .arg(".tables")
+        .arg("SELECT * FROM sqlite_master;")
         .output();
 
     match sqlite3_result {

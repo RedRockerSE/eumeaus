@@ -344,9 +344,15 @@ async fn v1_proof() {
 
     // 6. Attempt to open the case file directly with plain sqlite3 and
     // confirm it is unreadable without the key.
+    //
+    // A real SQL query is used rather than a dot-command (e.g. `.tables`):
+    // on some sqlite3 CLI builds (observed: 3.53.4 on Arch Linux),
+    // `.tables` against an encrypted file exits 0 with no output instead
+    // of surfacing the underlying read error, while a real query reliably
+    // reports it (see GitHub issue #11).
     match Command::new("sqlite3")
         .arg(&case_path)
-        .arg(".tables")
+        .arg("SELECT * FROM sqlite_master;")
         .output()
     {
         Ok(output) => {
