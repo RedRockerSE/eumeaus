@@ -1,0 +1,38 @@
+# Reference manifest for eumeaus-phone-lookup-plugin-python — the
+# proof-of-concept plugin that implements the wire protocol directly in
+# Python instead of via eumeaus-plugin-sdk (see plugin-developer-guide.md
+# §3, "if you're not using the Rust SDK").
+#
+# `signature` is intentionally blank: it covers
+# "{name}\n{version}\n{sha256(entrypoint binary)}" (see
+# eumeaus-plugin-host/src/signature.rs) — the "binary" here is `./run`,
+# and a valid signature would have to be computed against that exact file
+# by whoever packages/distributes it, not checked in against source that
+# hasn't been installed anywhere yet. It loads fine unsigned
+# (TrustPolicy::AllowUnsigned, the default) as-is.
+
+[plugin]
+name = "phone-lookup"
+version = "0.1.0"
+description = "Offline libphonenumber-based validity/region/carrier lookup for a phone number (Python proof-of-concept, no Rust SDK, no network call)"
+author = "Eumeaus Core Team"
+signature = ""
+
+[compatibility]
+engine_min = "0.1.0"
+engine_max = "0.x"
+protocol_version = "1"
+
+[contract]
+input_entity_types = ["PhoneNumber"]
+output_entity_types = ["PhoneNumber", "Location", "Organization"]
+output_relationship_types = ["LocatedAt", "AssociatedWith"]
+
+[permissions]
+network = false
+requested_credentials = []
+
+[execution]
+entrypoint = "./run"
+default_rate_limit_per_sec = 50
+default_timeout_ms = 3000

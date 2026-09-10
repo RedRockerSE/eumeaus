@@ -1,0 +1,4 @@
+# Runtime dependencies for plugin.py itself.
+grpcio>=1.60
+protobuf>=5.26
+phonenumbers>=8.13

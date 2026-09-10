@@ -459,6 +459,19 @@ original casing the value was entered with. If your plugin's target type
 is case-sensitive, this is why it just works — you don't need to do
 anything differently.
 
+§3's promise that this protocol doesn't require Rust has a real example
+backing it: [`eumeaus-phone-lookup-plugin-python/`](./eumeaus-phone-lookup-plugin-python/)
+(repo root, not under `crates/` — it isn't a Cargo crate) implements the
+handshake and gRPC service directly in Python, no SDK, no generated-code
+magic beyond the same `plugin.proto` this guide already points at. Its
+own `README.md` covers setup/running/testing in full; worth reading
+alongside `crates/eumeaus-crypto-wallet-plugin/` above since it reuses
+that plugin's same-`canonical_key` self-merge pattern (offline
+libphonenumber enrichment on a scanned `PhoneNumber`) plus
+`eumeaus-ip-lookup-plugin`'s one-call/multiple-entity-type pattern
+(the same lookup also emits a related `Location` and, when resolvable,
+an `Organization` for the carrier).
+
 ## 11. Where to look for more
 
 - [`SPEC.md`](./SPEC.md) §2.2–2.4, §3.2–3.3 — full architectural
