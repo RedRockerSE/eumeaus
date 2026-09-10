@@ -1,0 +1,20 @@
+#!/bin/sh
+# The eumeaus-plugin-host `[[execution]] entrypoint` for this plugin.
+#
+# eumeaus-plugin-host spawns whatever `entrypoint` names directly
+# (`Command::new(path).spawn()` — no shell, no PATH-relative interpreter
+# resolution beyond what the kernel's shebang handling gives a directly
+# executed script), and it runs with whatever environment the eumeaus
+# process itself inherited, not this plugin's own venv. A shebang line on
+# plugin.py itself (`#!/usr/bin/env python3`) would silently pick up
+# *that* PATH's python3, which may have none of requirements.txt
+# installed.
+#
+# This wrapper sidesteps that: it resolves its own real location (even if
+# `plugin.toml`'s directory was reached via a symlink, e.g. from a
+# `plugins/<name>` install) and execs this plugin's own `.venv/bin/python3`
+# by absolute path, so it always runs with the interpreter/dependencies
+# set up per README.md, regardless of the caller's environment.
+set -e
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+exec "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/plugin.py"

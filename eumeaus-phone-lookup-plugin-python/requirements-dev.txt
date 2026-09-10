@@ -1,0 +1,5 @@
+# Only needed to regenerate pb/plugin_pb2*.py from ../crates/
+# eumeaus-plugin-protocol/plugin.proto (see regenerate_proto.sh) or to run
+# tests/test_plugin.py. Not needed to run the plugin itself.
+-r requirements.txt
+pytest>=7.0
