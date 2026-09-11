@@ -875,17 +875,240 @@ fn format_unix_ms_utc(unix_ms: i64) -> String {
         .unwrap_or_else(|| unix_ms.to_string())
 }
 
-const REPORT_CSS: &str = "\
-body { font-family: sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }\
-h1, h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.3rem; }\
-.entity { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem 1rem; margin: 1rem 0; }\
-.entity .type { color: #666; font-weight: normal; }\
-table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }\
-th, td { border: 1px solid #ddd; padding: 0.3rem 0.5rem; text-align: left; font-size: 0.9rem; }\
-th { background: #f5f5f5; }\
-code { background: #f5f5f5; padding: 0.1rem 0.3rem; border-radius: 3px; }\
-code.faint { background: none; color: #888; padding: 0; }\
-";
+// A "case dossier" treatment (design review: an Artifact mockup against
+// sample data, iterated once — backgrounds flattened to plain white after
+// that review, since this is meant to be printed) rather than a bare
+// unstyled document. Source Serif 4 (headings) + IBM Plex Sans (body) +
+// IBM Plex Mono (ids/timestamps/data) — deliberately not the Inter-on-cream
+// combination every generic AI-styled page reaches for. Colors echo the
+// GUI's own accent hue (`entityStyle.ts`'s `--accent`) for product
+// consistency, recalibrated for a white, printable background rather than
+// the GUI's dark theme. `@media print` avoids splitting an entity card or
+// table row across a page break.
+const REPORT_CSS: &str = r#"
+:root {
+  --ink: #1c1a29;
+  --paper: #ffffff;
+  --line: #ded7f2;
+  --accent: #5b46c9;
+  --muted: #6c6480;
+  --good: #2f7d5a;
+  --good-soft: #e4f2ea;
+  --warn: #a6532c;
+  --warn-soft: #f6e9e0;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #eee9fb; --paper: #141220; --line: #322a4d; --accent: #a795f5;
+    --muted: #a99fc4; --good: #6fcf9c; --good-soft: #1c2c24;
+    --warn: #d98a5f; --warn-soft: #2e2119;
+  }
+}
+* { box-sizing: border-box; }
+html { color-scheme: light dark; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px; line-height: 1.6; -webkit-font-smoothing: antialiased;
+}
+.page { max-width: 880px; margin: 0 auto; padding: 3.5rem 2rem 4rem; }
+.masthead { border-top: 3px solid var(--accent); padding-top: 1.4rem; margin-bottom: 2.6rem; }
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin: 0 0 0.6rem;
+}
+h1.title {
+  font-family: "Source Serif 4", Georgia, serif; font-weight: 600; font-size: 2.2rem;
+  line-height: 1.15; margin: 0 0 0.75rem; text-wrap: balance; letter-spacing: -0.01em;
+}
+.meta-row {
+  display: flex; flex-wrap: wrap; gap: 0.4rem 1.6rem;
+  font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--muted);
+}
+.meta-row b { color: var(--ink); font-weight: 500; }
+.stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: var(--line); border: 1px solid var(--line); border-radius: 4px;
+  overflow: hidden; margin-bottom: 3rem;
+}
+.stat { background: var(--paper); padding: 1rem 1.1rem; }
+.stat .n {
+  font-family: "Source Serif 4", Georgia, serif; font-size: 1.9rem; font-weight: 600;
+  font-variant-numeric: tabular-nums; line-height: 1; display: block; margin-bottom: 0.3rem;
+}
+.stat .l { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+section.block { margin-bottom: 3.2rem; }
+.section-head {
+  display: flex; align-items: baseline; gap: 0.7rem;
+  border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; margin-bottom: 1.4rem;
+}
+.section-head .num { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--accent); font-weight: 500; }
+.section-head h2 { font-family: "Source Serif 4", Georgia, serif; font-weight: 600; font-size: 1.35rem; margin: 0; }
+.section-head .count { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+.empty { color: var(--muted); font-style: italic; font-size: 13.5px; }
+.badge {
+  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 22px;
+  border-radius: 3px; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.02em; flex: none;
+}
+.b-person { background: #ece7fa; color: #5b46c9; }
+.b-username { background: #e3f2e8; color: #2f7d5a; }
+.b-account { background: #eaf5ee; color: #3f8f66; }
+.b-email { background: #faf0dc; color: #96721c; }
+.b-vehicle { background: #fbf2e0; color: #a67c2c; }
+.b-phone { background: #fbe8f0; color: #a6386f; }
+.b-net { background: #e2eef9; color: #2a6ca6; }
+.b-org { background: #ececf1; color: #57536b; }
+.b-location { background: #f3ead9; color: #8a6a2f; }
+.b-wallet { background: #fbf1d9; color: #a6791c; }
+.b-other { background: #ececf1; color: #57536b; }
+@media (prefers-color-scheme: dark) {
+  .b-person { background: #2a2246; color: #c3b3fa; }
+  .b-username { background: #1c2c24; color: #7fdba8; }
+  .b-account { background: #172a20; color: #7fdba8; }
+  .b-email { background: #362c17; color: #e0b95c; }
+  .b-vehicle { background: #332912; color: #dcaa56; }
+  .b-phone { background: #3a2030; color: #ec8fb8; }
+  .b-net { background: #1c2c3a; color: #7ab6e8; }
+  .b-org { background: #2a283a; color: #b7b3d0; }
+  .b-location { background: #332a18; color: #d6b878; }
+  .b-wallet { background: #3a2e12; color: #e6c164; }
+  .b-other { background: #2a283a; color: #b7b3d0; }
+}
+.entity {
+  border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 3px;
+  padding: 1.1rem 1.3rem 1.2rem; margin-bottom: 1rem; background: var(--paper);
+  break-inside: avoid;
+}
+.entity-head { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.5rem; }
+.entity-head .name { font-family: "Source Serif 4", Georgia, serif; font-weight: 600; font-size: 1.15rem; }
+.entity-head .type { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); }
+.entity-ids { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); margin: 0 0 0.9rem; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); }
+th {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+  font-weight: 500; border-bottom: 1px solid var(--ink);
+}
+tr:last-child td { border-bottom: none; }
+.mono { font-family: "IBM Plex Mono", monospace; }
+.num { font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; padding: 0.12rem 0.5rem; border-radius: 99px; font-size: 11px; font-weight: 500; }
+.pill-current { background: var(--good-soft); color: var(--good); }
+.pill-conflict { background: var(--warn-soft); color: var(--warn); }
+.pill-superseded { background: var(--paper); color: var(--muted); border: 1px solid var(--line); }
+.audit { margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px dashed var(--line); }
+.audit .h { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.5rem; }
+.audit ul { list-style: none; margin: 0; padding: 0; }
+.audit li { display: flex; gap: 0.7rem; font-size: 12.5px; padding: 0.25rem 0; }
+.audit .when { font-family: "IBM Plex Mono", monospace; color: var(--muted); flex: none; width: 12rem; }
+.rel-endpoint { display: flex; align-items: center; gap: 0.5rem; }
+.rel-endpoint .txt .name { display: block; font-size: 13.5px; }
+.rel-endpoint .txt .id { display: block; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--muted); }
+.rel-arrow { color: var(--accent); font-size: 15px; text-align: center; }
+.rel-type-cell { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink); }
+footer {
+  margin-top: 3.5rem; padding-top: 1.2rem; border-top: 1px solid var(--line);
+  display: flex; justify-content: space-between;
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted);
+}
+@media print {
+  body { background: #fff; }
+  .page { padding: 0.5in 0.4in; max-width: none; }
+  .entity, tr { break-inside: avoid; }
+  section.block { break-inside: avoid-page; }
+}
+"#;
+
+/// `(badge CSS class, two-letter abbreviation)` for an entity type's
+/// report badge — mirrors `eumeaus-gui/src/entityStyle.ts`'s
+/// `TYPE_STYLES`/`styleForEntityType` (same hue groupings, e.g. Domain/
+/// IpAddress/Url all read as "networking" and share one color) so a type
+/// reads the same way in this report as it does in the GUI. Kept as its
+/// own small mapping here rather than shared code: that file is
+/// TypeScript, this is Rust, and the mapping is a handful of match arms,
+/// not worth a cross-language shared-data scheme.
+fn badge_style(entity_type: &EntityType) -> (&'static str, String) {
+    use EntityType::*;
+    match entity_type {
+        Person => ("b-person", "PE".to_string()),
+        Username => ("b-username", "UN".to_string()),
+        OnlineAccount => ("b-account", "OA".to_string()),
+        Email => ("b-email", "EM".to_string()),
+        Vehicle => ("b-vehicle", "VE".to_string()),
+        PhoneNumber => ("b-phone", "PH".to_string()),
+        Domain => ("b-net", "DO".to_string()),
+        IpAddress => ("b-net", "IP".to_string()),
+        Url => ("b-net", "UR".to_string()),
+        Organization => ("b-org", "OR".to_string()),
+        Document => ("b-org", "DC".to_string()),
+        Image => ("b-org", "IM".to_string()),
+        Location => ("b-location", "LO".to_string()),
+        CryptoWallet => ("b-wallet", "CW".to_string()),
+        Custom(name) => (
+            "b-other",
+            name.chars().take(2).collect::<String>().to_uppercase(),
+        ),
+    }
+}
+
+/// Same directional/non-directional split as `eumeaus-gui/src/
+/// entityStyle.ts`'s `isDirectionalRelationship` (the Graph screen's
+/// arrowheads) — kept in sync by hand for the same reason `badge_style`
+/// is: a handful of match arms, not worth sharing across languages. Purely
+/// a display choice (a single arrow vs. a double-headed one in the
+/// Relationships table); the underlying `from`/`to` data is unchanged
+/// either way.
+fn is_directional_relationship(rel_type: &RelationshipType) -> bool {
+    matches!(
+        rel_type,
+        RelationshipType::HasAccount
+            | RelationshipType::Owns
+            | RelationshipType::LocatedAt
+            | RelationshipType::MemberOf
+            | RelationshipType::ResolvesTo
+            | RelationshipType::Mentions
+    )
+}
+
+/// One resolved relationship endpoint's report presentation: its badge
+/// class/abbreviation, a human-readable name, and its raw id (kept
+/// visible, de-emphasized, for provenance tracing — see
+/// [`export_html`]'s `entity_displays` map).
+#[derive(Clone)]
+struct EndpointDisplay {
+    badge_class: &'static str,
+    abbr: String,
+    name: String,
+    id: EntityId,
+}
+
+/// Looks `id` up in `map` (built from the case's own entity list); falls
+/// back to a plain "unknown type" badge showing just the raw id if it's
+/// somehow missing (shouldn't happen — a merge re-points relationship
+/// endpoints at the survivor rather than leaving one dangling — but a
+/// report should never fail to generate over a display nicety).
+fn resolve_endpoint(
+    map: &std::collections::HashMap<EntityId, EndpointDisplay>,
+    id: EntityId,
+) -> EndpointDisplay {
+    map.get(&id).cloned().unwrap_or_else(|| EndpointDisplay {
+        badge_class: "b-other",
+        abbr: "??".to_string(),
+        name: id.to_string(),
+        id,
+    })
+}
+
+fn render_endpoint(e: &EndpointDisplay) -> String {
+    format!(
+        "<div class=\"rel-endpoint\"><span class=\"badge {}\">{}</span><span class=\"txt\"><span class=\"name\">{}</span><span class=\"id\">{}</span></span></div>",
+        e.badge_class,
+        html_escape(&e.abbr),
+        html_escape(&e.name),
+        e.id
+    )
+}
 
 /// Same underlying data as [`export_report`], rendered as a self-contained
 /// HTML document instead of JSON — human-readable, openable in any
@@ -896,18 +1119,43 @@ fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
     let mut html = String::new();
     html.push_str("<!doctype html>\n<html><head><meta charset=\"utf-8\">\n");
     html.push_str(&format!(
-        "<title>Eumeaus case report — {}</title>\n<style>{REPORT_CSS}</style>\n",
+        "<title>{} — Eumeaus case report</title>\n",
         html_escape(&case.name)
     ));
-    html.push_str("</head><body>\n");
-    html.push_str(&format!("<h1>Case: {}</h1>\n", html_escape(&case.name)));
-    html.push_str(&format!(
-        "<p>Case ID: <code>{}</code><br>Generated: {}</p>\n",
-        case.case_id,
-        format_unix_ms_utc(crate::now_unix_ms())
-    ));
+    html.push_str(
+        "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n\
+         <link href=\"https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap\" rel=\"stylesheet\">\n",
+    );
+    html.push_str(&format!("<style>{REPORT_CSS}</style>\n"));
+    html.push_str("</head><body>\n<div class=\"page\">\n");
 
-    html.push_str("<h2>Entities</h2>\n");
+    let generated = format_unix_ms_utc(crate::now_unix_ms());
+    html.push_str("<div class=\"masthead\">\n");
+    html.push_str("<p class=\"eyebrow\">Eumeaus · Case Report</p>\n");
+    html.push_str(&format!(
+        "<h1 class=\"title\">{}</h1>\n",
+        html_escape(&case.name)
+    ));
+    html.push_str(&format!(
+        "<div class=\"meta-row\"><span>Case ID <b class=\"mono\">{}</b></span><span>Generated <b>{generated}</b></span></div>\n",
+        case.case_id
+    ));
+    html.push_str("</div>\n");
+
+    let stats = crud::case_stats(&case.conn)?;
+    html.push_str("<div class=\"stats\">\n");
+    for (n, label) in [
+        (stats.entity_count, "Entities"),
+        (stats.relationship_count, "Relationships"),
+        (stats.fact_count, "Facts recorded"),
+        (stats.conflicting_entity_count, "Entities in conflict"),
+    ] {
+        html.push_str(&format!(
+            "<div class=\"stat\"><span class=\"n\">{n}</span><span class=\"l\">{label}</span></div>\n"
+        ));
+    }
+    html.push_str("</div>\n");
+
     let entities = crud::list_entities(
         &case.conn,
         EntityFilter {
@@ -915,44 +1163,66 @@ fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
             ..Default::default()
         },
     )?;
-    if entities.is_empty() {
-        html.push_str("<p><em>None.</em></p>\n");
-    }
     // Built before the loop below consumes `entities` — the Relationships
     // section (after it) needs to resolve each endpoint's id to something
-    // an investigator can actually read, not a bare UUID.
-    let entity_names: std::collections::HashMap<EntityId, String> = entities
+    // an investigator can actually read, not a bare UUID, complete with
+    // the same type badge its own entity card uses.
+    let entity_displays: std::collections::HashMap<EntityId, EndpointDisplay> = entities
         .iter()
-        .map(|e| (e.id, format!("{} ({})", e.display_label, e.entity_type)))
+        .map(|e| {
+            let (badge_class, abbr) = badge_style(&e.entity_type);
+            (
+                e.id,
+                EndpointDisplay {
+                    badge_class,
+                    abbr,
+                    name: e.display_label.clone(),
+                    id: e.id,
+                },
+            )
+        })
         .collect();
+
+    html.push_str("<section class=\"block\">\n");
+    html.push_str(&format!(
+        "<div class=\"section-head\"><span class=\"num\">01</span><h2>Entities</h2><span class=\"count\">{} total</span></div>\n",
+        entities.len()
+    ));
+    if entities.is_empty() {
+        html.push_str("<p class=\"empty\">None.</p>\n");
+    }
     for entity in entities {
         let attrs = crud::list_attribute_records(&case.conn, entity.id)?;
         let audit = crud::audit_trail(&case.conn, AuditTarget::Entity(entity.id))?;
+        let (badge_class, abbr) = badge_style(&entity.entity_type);
+
         html.push_str("<div class=\"entity\">\n");
         html.push_str(&format!(
-            "<h3>{} <span class=\"type\">({})</span></h3>\n",
+            "<div class=\"entity-head\"><span class=\"badge {badge_class}\">{}</span><span class=\"name\">{}</span><span class=\"type\">{}</span></div>\n",
+            html_escape(&abbr),
             html_escape(&entity.display_label),
             html_escape(&entity.entity_type.to_string())
         ));
         html.push_str(&format!(
-            "<p>ID: <code>{}</code><br>Canonical key: <code>{}</code></p>\n",
+            "<p class=\"entity-ids\">ID <span class=\"mono\">{}</span> · Canonical key <span class=\"mono\">{}</span></p>\n",
             entity.id,
             html_escape(entity.canonical_key.as_deref().unwrap_or("-"))
         ));
+
         if attrs.is_empty() {
-            html.push_str("<p><em>No attributes.</em></p>\n");
+            html.push_str("<p class=\"empty\">No attributes.</p>\n");
         } else {
             html.push_str(
-                "<table><tr><th>Key</th><th>Value</th><th>Source</th><th>Collected</th><th>Current</th><th>Fact ID</th></tr>\n",
+                "<table><tr><th>Key</th><th>Value</th><th>Source</th><th>Collected</th><th>Status</th><th>Fact ID</th></tr>\n",
             );
             for a in &attrs {
-                let current = match (a.is_current, a.conflicting) {
-                    (true, true) => "yes (conflict)",
-                    (true, false) => "yes",
-                    (false, _) => "no",
+                let status_pill = match (a.is_current, a.conflicting) {
+                    (true, true) => "<span class=\"pill pill-conflict\">conflict</span>",
+                    (true, false) => "<span class=\"pill pill-current\">current</span>",
+                    (false, _) => "<span class=\"pill pill-superseded\">superseded</span>",
                 };
                 html.push_str(&format!(
-                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{current}</td><td><code>{}</code></td></tr>\n",
+                    "<tr><td>{}</td><td>{}</td><td class=\"mono\">{}</td><td class=\"mono num\">{}</td><td>{status_pill}</td><td class=\"mono\">{}</td></tr>\n",
                     html_escape(&a.key),
                     html_escape(&a.value),
                     html_escape(&a.source),
@@ -962,51 +1232,60 @@ fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
             }
             html.push_str("</table>\n");
         }
+
         if !audit.is_empty() {
-            html.push_str("<h4>Audit events</h4>\n<ul>\n");
+            html.push_str("<div class=\"audit\">\n<div class=\"h\">Audit trail</div>\n<ul>\n");
             for e in &audit {
                 html.push_str(&format!(
-                    "<li>{} — {} by {}: {}</li>\n",
+                    "<li><span class=\"when mono\">{}</span><span>{} by {}: {}</span></li>\n",
                     format_unix_ms_utc(e.occurred_at_unix_ms),
                     html_escape(&e.event_type),
                     html_escape(&e.actor),
                     html_escape(&e.description)
                 ));
             }
-            html.push_str("</ul>\n");
+            html.push_str("</ul>\n</div>\n");
         }
         html.push_str("</div>\n");
     }
+    html.push_str("</section>\n");
 
-    html.push_str("<h2>Relationships</h2>\n");
     let relationships = crud::list_relationships(&case.conn, true)?;
+    html.push_str("<section class=\"block\">\n");
+    html.push_str(&format!(
+        "<div class=\"section-head\"><span class=\"num\">02</span><h2>Relationships</h2><span class=\"count\">{} total</span></div>\n",
+        relationships.len()
+    ));
     if relationships.is_empty() {
-        html.push_str("<p><em>None.</em></p>\n");
+        html.push_str("<p class=\"empty\">None.</p>\n");
     } else {
-        html.push_str("<table><tr><th>From</th><th>Type</th><th>To</th><th>Created</th></tr>\n");
+        html.push_str("<table><tr><th>From</th><th></th><th>Relationship</th><th>To</th><th>Created</th></tr>\n");
         for r in &relationships {
-            let from_label = entity_names
-                .get(&r.from)
-                .cloned()
-                .unwrap_or_else(|| r.from.to_string());
-            let to_label = entity_names
-                .get(&r.to)
-                .cloned()
-                .unwrap_or_else(|| r.to.to_string());
+            let from = resolve_endpoint(&entity_displays, r.from);
+            let to = resolve_endpoint(&entity_displays, r.to);
+            let arrow = if is_directional_relationship(&r.relationship_type) {
+                "→"
+            } else {
+                "↔"
+            };
             html.push_str(&format!(
-                "<tr><td>{} <code class=\"faint\">{}</code></td><td>{}</td><td>{} <code class=\"faint\">{}</code></td><td>{}</td></tr>\n",
-                html_escape(&from_label),
-                r.from,
+                "<tr><td>{}</td><td class=\"rel-arrow\">{arrow}</td><td class=\"rel-type-cell\">{}</td><td>{}</td><td class=\"mono num\">{}</td></tr>\n",
+                render_endpoint(&from),
                 html_escape(&r.relationship_type.to_string()),
-                html_escape(&to_label),
-                r.to,
+                render_endpoint(&to),
                 format_unix_ms_utc(r.created_at_unix_ms)
             ));
         }
         html.push_str("</table>\n");
     }
+    html.push_str("</section>\n");
 
-    html.push_str("</body></html>\n");
+    html.push_str(&format!(
+        "<footer><span>Case ID <span class=\"mono\">{}</span></span><span>Generated {generated} · Eumeaus</span></footer>\n",
+        case.case_id
+    ));
+
+    html.push_str("</div>\n</body></html>\n");
     fs::write(dest, html)?;
     Ok(())
 }
@@ -1306,7 +1585,7 @@ mod tests {
 
         let html = fs::read_to_string(&dest).unwrap();
         assert!(html.starts_with("<!doctype html>"));
-        assert!(html.contains("<h1>Case: export-html</h1>"));
+        assert!(html.contains("<h1 class=\"title\">export-html</h1>"));
         assert!(
             !html.contains("<script>alert(1)</script>"),
             "entity-supplied content must be HTML-escaped, not injected raw:\n{html}"
@@ -1386,12 +1665,118 @@ mod tests {
         let html = fs::read_to_string(&dest).unwrap();
 
         assert!(
-            html.contains("alice (Person)") && html.contains("bob (Person)"),
+            html.contains("class=\"name\">alice<") && html.contains("class=\"name\">bob<"),
             "relationship endpoints should show a readable entity name, not just an id:\n{html}"
+        );
+        assert!(
+            html.contains("badge b-person"),
+            "relationship endpoints should carry the same type badge as the entity card:\n{html}"
         );
         // The raw ids stay present (de-emphasized) for provenance tracing.
         assert!(html.contains(&alice.to_string()));
         assert!(html.contains(&bob.to_string()));
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn export_html_summary_strip_matches_case_stats() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "export-html-stats").unwrap();
+        let a = case
+            .add_entity(
+                EntityType::Person,
+                Some("dana".to_string()),
+                vec![Attribute {
+                    key: "role".to_string(),
+                    value: "analyst".to_string(),
+                }],
+                test_provenance(),
+            )
+            .unwrap();
+        let b = case
+            .add_entity(EntityType::Organization, None, vec![], test_provenance())
+            .unwrap();
+        case.add_relationship(a, b, RelationshipType::MemberOf, vec![], test_provenance())
+            .unwrap();
+
+        let dest = dir.path().join("report.html");
+        case.export(&dest, ExportFormat::Html).unwrap();
+        let html = fs::read_to_string(&dest).unwrap();
+
+        let stats = crud::case_stats(&case.conn).unwrap();
+        assert_eq!(stats.entity_count, 2);
+        assert_eq!(stats.relationship_count, 1);
+        assert!(html.contains(&format!(
+            "<span class=\"n\">{}</span><span class=\"l\">Entities</span>",
+            stats.entity_count
+        )));
+        assert!(html.contains(&format!(
+            "<span class=\"n\">{}</span><span class=\"l\">Relationships</span>",
+            stats.relationship_count
+        )));
+        assert!(html.contains(&format!(
+            "<span class=\"n\">{}</span><span class=\"l\">Facts recorded</span>",
+            stats.fact_count
+        )));
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn export_html_shows_a_conflict_pill_for_a_disputed_attribute() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "export-html-conflict-pill").unwrap();
+        case.add_entity(
+            EntityType::Username,
+            Some("erin".to_string()),
+            vec![Attribute {
+                key: "color".to_string(),
+                value: "blue".to_string(),
+            }],
+            test_provenance(),
+        )
+        .unwrap();
+        let mut later = test_provenance();
+        later.collected_at_unix_ms = 2000;
+        case.add_entity(
+            EntityType::Username,
+            Some("erin".to_string()),
+            vec![Attribute {
+                key: "color".to_string(),
+                value: "red".to_string(),
+            }],
+            later,
+        )
+        .unwrap();
+
+        let dest = dir.path().join("report.html");
+        case.export(&dest, ExportFormat::Html).unwrap();
+        let html = fs::read_to_string(&dest).unwrap();
+
+        assert!(
+            html.contains("pill pill-conflict\">conflict"),
+            "a key with two disagreeing values should render a conflict pill:\n{html}"
+        );
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn export_html_badges_an_entity_by_its_type() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "export-html-badge").unwrap();
+        case.add_entity(EntityType::CryptoWallet, None, vec![], test_provenance())
+            .unwrap();
+
+        let dest = dir.path().join("report.html");
+        case.export(&dest, ExportFormat::Html).unwrap();
+        let html = fs::read_to_string(&dest).unwrap();
+
+        assert!(
+            html.contains("badge b-wallet\">CW"),
+            "a CryptoWallet entity should get the wallet badge with a CW abbreviation:\n{html}"
+        );
 
         cleanup(&case);
     }
