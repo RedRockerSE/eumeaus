@@ -119,6 +119,18 @@ export interface AuditEvent {
   occurred_at_unix_ms: number;
 }
 
+export type MapPointSource = "location_entity" | "attribute";
+
+export interface MapPoint {
+  entity_id: string;
+  entity_type: string;
+  display_label: string;
+  lat: number;
+  lon: number;
+  source: MapPointSource;
+  related_entity_ids: string[];
+}
+
 // ---- case_state.rs ----
 
 export const caseCreate = (dir: string, name: string) =>
@@ -179,6 +191,7 @@ export const entityAudit = (id: string) => invoke<AuditEvent[]>("entity_audit", 
 
 export const caseStats = () => invoke<CaseStats>("case_stats");
 export const auditList = (limit: number) => invoke<AuditEvent[]>("audit_list", { limit });
+export const mapPoints = () => invoke<MapPoint[]>("map_points");
 
 // ---- scan_state.rs ----
 

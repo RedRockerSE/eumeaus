@@ -1288,6 +1288,114 @@ pub(crate) fn list_relationships(
     Ok(rows)
 }
 
+/// Parses a `Location` entity's `canonical_key` as `"{lat},{lon}"`
+/// (`eumeaus-ip-lookup-plugin`/EXIF's own convention) — `None` for a
+/// `Location` with no coordinate (e.g. `eumeaus-phone-lookup-plugin`'s
+/// region-code-only key), which is a normal, common case here, not a
+/// malformed one.
+fn parse_coordinate_key(key: &str) -> Option<(f64, f64)> {
+    let (lat_str, lon_str) = key.split_once(',')?;
+    let lat: f64 = lat_str.trim().parse().ok()?;
+    let lon: f64 = lon_str.trim().parse().ok()?;
+    if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+        return None;
+    }
+    Some((lat, lon))
+}
+
+/// Every plottable point for the GUI's Map screen (SPEC.md §9.3) — see
+/// [`crate::MapPoint`]'s own doc for the two detection paths. Two
+/// targeted queries rather than a per-entity attribute scan (a large
+/// case could have many entities with no location data at all): one for
+/// `Location`-typed entities (checked against their `canonical_key`),
+/// one that finds *candidate* entity ids via a plain `entity_attributes`
+/// key lookup before paying for [`list_attribute_records`]'s full
+/// current/conflicting resolution — only on those candidates.
+pub(crate) fn list_map_points(conn: &Connection) -> Result<Vec<crate::MapPoint>, EngineError> {
+    let mut points = Vec::new();
+
+    let mut location_stmt = conn.prepare(&format!("{ENTITY_SELECT} WHERE entity_type = ?1"))?;
+    let location_entities = location_stmt
+        .query_map(params![EntityType::Location.to_string()], entity_from_row)?
+        .collect::<Result<Vec<_>, _>>()?;
+    // Fetched once, outside the loop below, rather than once per Location
+    // entity — this case-wide list is the same regardless of which
+    // Location it's being filtered for.
+    let all_relationships = list_relationships(conn, true)?;
+    for entity in location_entities {
+        let Some(key) = entity.canonical_key.as_deref() else {
+            continue;
+        };
+        let Some((lat, lon)) = parse_coordinate_key(key) else {
+            continue;
+        };
+        let related_entity_ids = all_relationships
+            .iter()
+            .filter(|r| {
+                r.to == entity.id
+                    && r.relationship_type == RelationshipType::LocatedAt
+                    && r.from != entity.id
+            })
+            .map(|r| r.from)
+            .collect();
+        points.push(crate::MapPoint {
+            entity_id: entity.id,
+            entity_type: entity.entity_type,
+            display_label: entity.display_label,
+            lat,
+            lon,
+            source: crate::MapPointSource::LocationEntity,
+            related_entity_ids,
+        });
+    }
+
+    let mut candidate_stmt = conn
+        .prepare("SELECT DISTINCT entity_id FROM entity_attributes WHERE key IN ('lat', 'lon')")?;
+    let candidate_ids: Vec<String> = candidate_stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for id_str in candidate_ids {
+        let entity_id =
+            EntityId(Uuid::parse_str(&id_str).expect("stored entity id is a valid uuid"));
+        // Location entities are already covered by the loop above via
+        // canonical_key — this second path exists for *other* entity
+        // types, so skip anything that's already a Location to avoid a
+        // duplicate point when a Location also happens to carry explicit
+        // lat/lon attributes (eumeaus-ip-lookup-plugin's own Locations do).
+        let entity = get_entity(conn, entity_id)?;
+        if entity.entity_type == EntityType::Location {
+            continue;
+        }
+        let attrs = list_attribute_records(conn, entity_id)?;
+        let current_value = |key: &str| {
+            attrs
+                .iter()
+                .find(|a| a.is_current && a.key == key)
+                .map(|a| a.value.as_str())
+        };
+        let (Some(lat_str), Some(lon_str)) = (current_value("lat"), current_value("lon")) else {
+            continue;
+        };
+        let (Ok(lat), Ok(lon)) = (lat_str.parse::<f64>(), lon_str.parse::<f64>()) else {
+            continue;
+        };
+        if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+            continue;
+        }
+        points.push(crate::MapPoint {
+            entity_id: entity.id,
+            entity_type: entity.entity_type,
+            display_label: entity.display_label,
+            lat,
+            lon,
+            source: crate::MapPointSource::Attribute,
+            related_entity_ids: Vec::new(),
+        });
+    }
+
+    Ok(points)
+}
+
 pub(crate) fn audit_trail(
     conn: &Connection,
     target: AuditTarget,
@@ -2590,6 +2698,144 @@ mod tests {
 
         let all = list_relationships(&conn, true).unwrap();
         assert_eq!(all.len(), 1);
+    }
+
+    #[test]
+    fn list_map_points_includes_a_location_entity_with_a_coordinate_key() {
+        let mut conn = test_conn();
+        let person = add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("mallory".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let location = add_entity(
+            &mut conn,
+            EntityType::Location,
+            Some("40.689247,-74.044503".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        add_relationship(
+            &mut conn,
+            person,
+            location,
+            RelationshipType::LocatedAt,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let points = list_map_points(&conn).unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].entity_id, location);
+        assert!((points[0].lat - 40.689247).abs() < 1e-6);
+        assert!((points[0].lon - -74.044503).abs() < 1e-6);
+        assert_eq!(points[0].source, crate::MapPointSource::LocationEntity);
+        assert_eq!(points[0].related_entity_ids, vec![person]);
+    }
+
+    #[test]
+    fn list_map_points_skips_a_location_entity_with_no_coordinate_key() {
+        let mut conn = test_conn();
+        // eumeaus-phone-lookup-plugin's own shape: a Location keyed on a
+        // bare region code, no coordinates at all.
+        add_entity(
+            &mut conn,
+            EntityType::Location,
+            Some("US".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        assert!(list_map_points(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_map_points_includes_a_non_location_entity_with_lat_lon_attributes() {
+        let mut conn = test_conn();
+        let ip = add_entity(
+            &mut conn,
+            EntityType::IpAddress,
+            Some("203.0.113.7".to_string()),
+            vec![attr("lat", "51.5074"), attr("lon", "-0.1278")],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let points = list_map_points(&conn).unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].entity_id, ip);
+        assert!((points[0].lat - 51.5074).abs() < 1e-6);
+        assert!((points[0].lon - -0.1278).abs() < 1e-6);
+        assert_eq!(points[0].source, crate::MapPointSource::Attribute);
+        assert!(points[0].related_entity_ids.is_empty());
+    }
+
+    #[test]
+    fn list_map_points_uses_the_current_lat_lon_value_not_a_superseded_one() {
+        let mut conn = test_conn();
+        let id = add_entity(
+            &mut conn,
+            EntityType::Organization,
+            Some("acme".to_string()),
+            vec![attr("lat", "10.0"), attr("lon", "10.0")],
+            test_provenance(),
+        )
+        .unwrap();
+        let mut later = test_provenance();
+        later.collected_at_unix_ms = 2000;
+        add_entity(
+            &mut conn,
+            EntityType::Organization,
+            Some("acme".to_string()),
+            vec![attr("lat", "20.0"), attr("lon", "20.0")],
+            later,
+        )
+        .unwrap();
+
+        let points = list_map_points(&conn).unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].entity_id, id);
+        assert_eq!(points[0].lat, 20.0);
+        assert_eq!(points[0].lon, 20.0);
+    }
+
+    #[test]
+    fn list_map_points_does_not_duplicate_a_location_entitys_own_lat_lon_attributes() {
+        // eumeaus-ip-lookup-plugin's Location entities carry both a
+        // coordinate canonical_key AND explicit lat/lon attributes on
+        // themselves — must produce exactly one point, not two.
+        let mut conn = test_conn();
+        add_entity(
+            &mut conn,
+            EntityType::Location,
+            Some("48.8566,2.3522".to_string()),
+            vec![attr("lat", "48.8566"), attr("lon", "2.3522")],
+            test_provenance(),
+        )
+        .unwrap();
+
+        assert_eq!(list_map_points(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn list_map_points_is_empty_for_a_case_with_no_location_data() {
+        let mut conn = test_conn();
+        add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("no-location".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        assert!(list_map_points(&conn).unwrap().is_empty());
     }
 
     #[test]

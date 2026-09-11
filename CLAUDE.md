@@ -58,6 +58,15 @@ before merge.
 - Entity auto-merge is exact `(entity_type, canonical_key)` match only (case-
   insensitive, trimmed). Never auto-merge on fuzzy similarity — that's a
   manual `entity merge` action.
+- GUI Map screen (`crud::list_map_points`) contract for a plugin/feature
+  to make its findings map-visible: either a `Location`-typed entity
+  whose `canonical_key` is `"{lat},{lon}"` in decimal degrees (the
+  convention `eumeaus-ip-lookup-plugin` and image-upload EXIF extraction
+  both already use), or any entity carrying current `lat`/`lon`
+  attributes (exact keys, matching `eumeaus-ip-lookup-plugin`'s own
+  attributes on its `Location` entities). Not every `Location` entity
+  qualifies — `eumeaus-phone-lookup-plugin`'s are keyed on a bare region
+  code with no coordinate, and are correctly skipped, not an error.
 - CRUD/merge/split SQL lives in `eumeaus-engine/src/crud.rs` as free
   functions over `&Connection`/`&mut Connection`, not `Case` methods
   directly — `Case` (`case.rs`) just delegates. Keeps lifecycle and data

@@ -468,6 +468,36 @@ pub struct CaseStats {
     pub conflicting_entity_count: i64,
 }
 
+/// Which detection path (`crud::list_map_points`) surfaced a [`MapPoint`]
+/// for the GUI's Map screen: a `Location` entity whose `canonical_key`
+/// parses as `"{lat},{lon}"` (e.g. `eumeaus-ip-lookup-plugin`, or the
+/// image-upload EXIF path), or a current `lat`/`lon` attribute pair on
+/// any entity (the convention `eumeaus-ip-lookup-plugin` already uses on
+/// its own `Location` entities, generalized to any entity type a future
+/// plugin might tag directly). See CLAUDE.md's Conventions for the exact
+/// contract a plugin author needs to hit for their finding to be
+/// map-visible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapPointSource {
+    LocationEntity,
+    Attribute,
+}
+
+/// One plottable point for the GUI's Map screen (SPEC.md §9.3).
+/// `related_entity_ids` is only ever non-empty for
+/// `MapPointSource::LocationEntity` — the entities with a `LocatedAt`
+/// relationship pointing at this `Location`.
+#[derive(Debug, Clone)]
+pub struct MapPoint {
+    pub entity_id: EntityId,
+    pub entity_type: EntityType,
+    pub display_label: String,
+    pub lat: f64,
+    pub lon: f64,
+    pub source: MapPointSource,
+    pub related_entity_ids: Vec<EntityId>,
+}
+
 #[derive(Debug, Clone)]
 pub struct PluginRef {
     pub name: String,
