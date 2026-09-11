@@ -35,7 +35,19 @@ import { pickDocumentFile, pickImageFile } from "../pickers";
 type Tab = "facts" | "links" | "history" | "images" | "documents";
 const CUSTOM_REL_TYPE = "__custom__";
 
-export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChanged: () => void }) {
+export default function EntitiesScreen({
+  onEntitiesChanged,
+  scanCompletedTick,
+}: {
+  onEntitiesChanged: () => void;
+  // Bumped by App.tsx once per scan that finishes (SPEC.md §9.3's
+  // auto-scan-on-add is the main reason this can happen with nobody
+  // having clicked anything on this screen). Listed as an extra
+  // dependency on the list/selected-detail/relationships effects below so
+  // a change re-runs them, the same way typeFilter or selectedId
+  // changing already does — not a separate effect of its own.
+  scanCompletedTick: number;
+}) {
   const [entities, setEntities] = useState<EntitySummary[] | null>(null);
   const [typeFilter, setTypeFilter] = useState("All");
   const [showHidden, setShowHidden] = useState(false);
@@ -95,7 +107,7 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeFilter, showHidden]);
+  }, [typeFilter, showHidden, scanCompletedTick]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -105,14 +117,20 @@ export default function EntitiesScreen({ onEntitiesChanged }: { onEntitiesChange
     entityShow(selectedId)
       .then(setSelected)
       .catch((e) => setError(String(e)));
-  }, [selectedId]);
+    // scanCompletedTick: a background scan (SPEC.md §9.3's auto-scan-on-add,
+    // or a manually run one) can add facts/attributes to the entity
+    // currently open in this pane without the investigator touching
+    // anything here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, scanCompletedTick]);
 
   useEffect(() => {
     if (!selectedId || tab !== "links") return;
     relationshipList()
       .then(setRelationships)
       .catch((e) => setError(String(e)));
-  }, [selectedId, tab]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, tab, scanCompletedTick]);
 
   useEffect(() => {
     if (!selectedId || tab !== "history") return;
