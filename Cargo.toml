@@ -67,6 +67,14 @@ wiremock = "0.6.5"
 # M6: credential management (interactive `credential set` prompt).
 rpassword = "7.5.4"
 
+# HTML report export: rendering a stored unix-ms timestamp as a
+# human-readable UTC datestamp (SPEC.md §8 open question 6) rather than
+# hand-rolling calendar math (leap years/seconds are a real bug source).
+# Already in the dependency tree transitively via tauri's own stack
+# (eumeaus-gui), at the same 0.3.x line — this just makes it a direct,
+# explicit dependency for eumeaus-engine's own use.
+time = { version = "0.3.55", features = ["formatting"] }
+
 [profile.dev]
 debug = 1
 
