@@ -19,6 +19,13 @@ use serde::{Deserialize, Serialize};
 struct SettingsFile {
     #[serde(default)]
     plugins_dir: Option<String>,
+    /// Auto-scan-on-add (SPEC.md §9.3): off unless explicitly turned on —
+    /// silently hitting third-party plugin APIs the moment an investigator
+    /// jots down a lead, before they've decided to expose that indicator,
+    /// is an OPSEC-relevant default, same "investigator opts in" posture
+    /// already used for plugin trust/signing.
+    #[serde(default)]
+    auto_scan_enabled: bool,
 }
 
 /// `EUMEAUS_GUI_SETTINGS_PATH` overrides the default location — used by
@@ -62,6 +69,17 @@ fn do_settings_set_plugins_dir(dir: &str) -> Result<(), String> {
     save(&path, &settings)
 }
 
+fn do_settings_get_auto_scan_enabled() -> Result<bool, String> {
+    Ok(load(&settings_path()?)?.auto_scan_enabled)
+}
+
+fn do_settings_set_auto_scan_enabled(enabled: bool) -> Result<(), String> {
+    let path = settings_path()?;
+    let mut settings = load(&path)?;
+    settings.auto_scan_enabled = enabled;
+    save(&path, &settings)
+}
+
 #[tauri::command]
 pub async fn settings_get_plugins_dir() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(do_settings_get_plugins_dir)
@@ -72,6 +90,20 @@ pub async fn settings_get_plugins_dir() -> Result<Option<String>, String> {
 #[tauri::command]
 pub async fn settings_set_plugins_dir(dir: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || do_settings_set_plugins_dir(&dir))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn settings_get_auto_scan_enabled() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(do_settings_get_auto_scan_enabled)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn settings_set_auto_scan_enabled(enabled: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || do_settings_set_auto_scan_enabled(enabled))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -138,5 +170,32 @@ mod tests {
             do_settings_get_plugins_dir().unwrap(),
             Some("/second".to_string())
         );
+    }
+
+    #[test]
+    fn auto_scan_enabled_defaults_to_false_on_a_fresh_settings_file() {
+        let _guard = temp_settings();
+        assert!(!do_settings_get_auto_scan_enabled().unwrap());
+    }
+
+    #[test]
+    fn auto_scan_enabled_set_then_get_round_trips() {
+        let _guard = temp_settings();
+        do_settings_set_auto_scan_enabled(true).unwrap();
+        assert!(do_settings_get_auto_scan_enabled().unwrap());
+        do_settings_set_auto_scan_enabled(false).unwrap();
+        assert!(!do_settings_get_auto_scan_enabled().unwrap());
+    }
+
+    #[test]
+    fn auto_scan_enabled_is_independent_of_plugins_dir() {
+        let _guard = temp_settings();
+        do_settings_set_plugins_dir("/home/investigator/plugins").unwrap();
+        do_settings_set_auto_scan_enabled(true).unwrap();
+        assert_eq!(
+            do_settings_get_plugins_dir().unwrap(),
+            Some("/home/investigator/plugins".to_string())
+        );
+        assert!(do_settings_get_auto_scan_enabled().unwrap());
     }
 }

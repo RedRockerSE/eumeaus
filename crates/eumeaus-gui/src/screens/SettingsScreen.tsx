@@ -7,7 +7,9 @@ import {
   credentialList,
   credentialRemove,
   credentialSet,
+  settingsGetAutoScanEnabled,
   settingsGetPluginsDir,
+  settingsSetAutoScanEnabled,
   settingsSetPluginsDir,
   trustAdd,
   trustList,
@@ -21,12 +23,29 @@ function GeneralPane() {
   const [pluginsDir, setPluginsDir] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autoScanEnabled, setAutoScanEnabled] = useState(false);
+  const [autoScanError, setAutoScanError] = useState<string | null>(null);
 
   useEffect(() => {
     settingsGetPluginsDir()
       .then((dir) => setPluginsDir(dir ?? ""))
       .catch((e) => setError(String(e)));
+    settingsGetAutoScanEnabled()
+      .then(setAutoScanEnabled)
+      .catch((e) => setAutoScanError(String(e)));
   }, []);
+
+  async function toggleAutoScan(enabled: boolean) {
+    setAutoScanError(null);
+    const previous = autoScanEnabled;
+    setAutoScanEnabled(enabled); // optimistic — a checkbox that lags the click reads as broken
+    try {
+      await settingsSetAutoScanEnabled(enabled);
+    } catch (e) {
+      setAutoScanEnabled(previous);
+      setAutoScanError(String(e));
+    }
+  }
 
   async function browse() {
     const picked = await pickDirectory();
@@ -72,6 +91,23 @@ function GeneralPane() {
         </button>
       </form>
       {saved && <p style={{ color: "var(--ok)", fontSize: 12, marginTop: 8 }}>Saved.</p>}
+
+      <h2 style={{ margin: "28px 0 6px", fontSize: 15, fontWeight: 600 }}>Auto-scan on add</h2>
+      <p style={{ margin: "0 0 12px", color: "var(--text-faint)", fontSize: 12.5, lineHeight: 1.6, maxWidth: "62ch" }}>
+        When on, adding a new entity immediately runs every plugin (from the directory above)
+        compatible with its type — no separate &ldquo;Run scan&rdquo; click needed. Off by default: a
+        plugin call happens the moment a lead is jotted down, before you&rsquo;ve decided to expose it
+        to a third party.
+      </p>
+      {autoScanError && <p className="error-text">{autoScanError}</p>}
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text)", cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          checked={autoScanEnabled}
+          onChange={(e) => toggleAutoScan(e.currentTarget.checked)}
+        />
+        Automatically scan newly added entities
+      </label>
     </>
   );
 }

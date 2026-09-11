@@ -27,6 +27,12 @@ function App() {
   const [stats, setStats] = useState<CaseStats | null>(null);
   const [scanRunning, setScanRunning] = useState(false);
   const [statusRight, setStatusRight] = useState("Ready");
+  // Bumped once per scan that finishes (any terminal state, not just
+  // success) — EntitiesScreen depends on this to refresh its list/
+  // selected-entity detail without the investigator having to navigate
+  // away and back. Starts at 0 so the initial mount (of whichever screen
+  // reads it) doesn't treat "no scan has ever run yet" as a completion.
+  const [scanCompletedTick, setScanCompletedTick] = useState(0);
 
   useEffect(() => {
     caseCurrent().then((c) => {
@@ -69,7 +75,11 @@ function App() {
         const scans = await scanList();
         const still = scans.some((s) => s.id === event.payload.scan_id && s.status === "RUNNING");
         setScanRunning(still);
-        if (!still) setStatusRight("Ready");
+        if (!still) {
+          setStatusRight("Ready");
+          setScanCompletedTick((t) => t + 1);
+          refreshStats(); // entity/fact counts in the footer can be stale otherwise
+        }
       } catch {
         // ignore — the dot just stays as it was
       }
@@ -107,7 +117,9 @@ function App() {
             />
             <div className="main">
               {screen === "overview" && <OverviewScreen current={currentCase} />}
-              {screen === "entities" && <EntitiesScreen onEntitiesChanged={refreshStats} />}
+              {screen === "entities" && (
+                <EntitiesScreen onEntitiesChanged={refreshStats} scanCompletedTick={scanCompletedTick} />
+              )}
               {screen === "graph" && <GraphScreen />}
               {screen === "scans" && <ScansScreen />}
               {screen === "plugins" && <PluginsScreen />}
@@ -118,6 +130,7 @@ function App() {
             entityCount={stats?.entity_count ?? 0}
             factCount={stats?.fact_count ?? 0}
             statusRight={statusRight}
+            scanRunning={scanRunning}
           />
         </>
       )}

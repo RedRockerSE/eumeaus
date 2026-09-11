@@ -149,6 +149,21 @@ pub(crate) fn add_entity(
     attrs: Vec<Attribute>,
     provenance: Provenance,
 ) -> Result<EntityId, EngineError> {
+    add_entity_with_outcome(conn, entity_type, key, attrs, provenance).map(|(id, _)| id)
+}
+
+/// Same as [`add_entity`], but also reports whether a new entity row was
+/// actually inserted vs. an existing `(entity_type, canonical_key)` match
+/// was appended to instead — the GUI's auto-scan-on-add feature (SPEC.md
+/// §9.3) needs this to avoid re-triggering a scan every time an
+/// investigator re-adds/touches an entity it already knows about.
+pub(crate) fn add_entity_with_outcome(
+    conn: &mut Connection,
+    entity_type: EntityType,
+    key: Option<String>,
+    attrs: Vec<Attribute>,
+    provenance: Provenance,
+) -> Result<(EntityId, bool), EngineError> {
     let display_label = key.clone();
     add_entity_impl(
         conn,
@@ -187,8 +202,12 @@ pub(crate) fn add_entity_from_scan(
         confidence,
         Some(scan_id),
     )
+    .map(|(id, _)| id)
 }
 
+/// Returns the entity id plus whether a new row was inserted (`true`) or
+/// an existing `(entity_type, canonical_key)` match was appended to
+/// instead (`false`).
 #[allow(clippy::too_many_arguments)]
 fn add_entity_impl(
     conn: &mut Connection,
@@ -199,7 +218,7 @@ fn add_entity_impl(
     provenance: Provenance,
     confidence: ConfidenceStatus,
     scan_id: Option<Uuid>,
-) -> Result<EntityId, EngineError> {
+) -> Result<(EntityId, bool), EngineError> {
     let entity_type_str = entity_type.to_string();
     let canonical_key = key.as_deref().map(normalize_key);
     let now = now_unix_ms();
@@ -217,6 +236,7 @@ fn add_entity_impl(
         None => None,
     };
 
+    let is_new = existing.is_none();
     let entity_id = match existing {
         Some(id_str) => {
             tx.execute(
@@ -273,7 +293,7 @@ fn add_entity_impl(
     }
 
     tx.commit()?;
-    Ok(EntityId(entity_id))
+    Ok((EntityId(entity_id), is_new))
 }
 
 /// Adds a new fact (and its attributes) directly to an *existing* entity,
@@ -1729,6 +1749,59 @@ mod tests {
         )
         .unwrap();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn add_entity_with_outcome_reports_created_then_merged() {
+        let mut conn = test_conn();
+        let (first_id, first_is_new) = add_entity_with_outcome(
+            &mut conn,
+            EntityType::Username,
+            Some("carol".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        assert!(first_is_new, "the first add of a fresh key must be new");
+
+        let (second_id, second_is_new) = add_entity_with_outcome(
+            &mut conn,
+            EntityType::Username,
+            Some("CAROL".to_string()), // different case, same normalized key
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        assert_eq!(first_id, second_id, "exact-key match must auto-merge");
+        assert!(
+            !second_is_new,
+            "merging onto an existing entity must not report as new"
+        );
+    }
+
+    #[test]
+    fn add_entity_with_outcome_reports_new_every_time_for_keyless_entities() {
+        let mut conn = test_conn();
+        let (_, a_is_new) = add_entity_with_outcome(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        let (_, b_is_new) = add_entity_with_outcome(
+            &mut conn,
+            EntityType::Person,
+            None,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+        assert!(
+            a_is_new && b_is_new,
+            "keyless adds never auto-merge, so each is a new entity"
+        );
     }
 
     #[test]

@@ -407,6 +407,14 @@ input.mono {
 .statusbar-mono {
   font-family: var(--font-mono);
 }
+.statusbar-scan-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: eu-pulse 1.2s ease-in-out infinite;
+}
 
 /* ---------- Chips / badges ---------- */
 

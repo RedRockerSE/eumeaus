@@ -239,6 +239,11 @@ export const settingsGetPluginsDir = () =>
 export const settingsSetPluginsDir = (dir: string) =>
   invoke<void>("settings_set_plugins_dir", { dir });
 
+export const settingsGetAutoScanEnabled = () =>
+  invoke<boolean>("settings_get_auto_scan_enabled");
+export const settingsSetAutoScanEnabled = (enabled: boolean) =>
+  invoke<void>("settings_set_auto_scan_enabled", { enabled });
+
 // ---- misc ----
 
 export const listEntityTypes = () => invoke<string[]>("list_entity_types");
