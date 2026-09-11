@@ -75,6 +75,12 @@ rpassword = "7.5.4"
 # explicit dependency for eumeaus-engine's own use.
 time = { version = "0.3.55", features = ["formatting"] }
 
+# Image-upload EXIF extraction (GPS/camera/timestamp on an uploaded
+# entity image, see crates/eumeaus-engine/src/exif_extract.rs). Pure
+# Rust, no unsafe, read-only — this project only ever reads metadata
+# out of a user-supplied image, never writes it back.
+kamadak-exif = "0.6.1"
+
 [profile.dev]
 debug = 1
 

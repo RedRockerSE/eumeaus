@@ -23,6 +23,7 @@ eumeaus-plugin-host.workspace = true
 ed25519-dalek.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync", "macros"] }
 time.workspace = true
+kamadak-exif.workspace = true
 
 [dev-dependencies]
 tempfile = "3.13.0"

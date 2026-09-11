@@ -374,6 +374,12 @@ pub(crate) fn add_image_to_entity(
     data: Vec<u8>,
     provenance: Provenance,
 ) -> Result<FactId, EngineError> {
+    // Read before `data` moves into the BLOB insert below. Never fails —
+    // see exif_extract's own doc comment; a file with no/unparseable
+    // EXIF (most PNGs, screenshots, GIFs) is the normal case, not an
+    // error, so this always returns something, just possibly all-`None`.
+    let metadata = crate::exif_extract::extract(&data);
+
     let now = now_unix_ms();
     let tx = conn.transaction()?;
     ensure_entity_exists(&tx, entity_id)?;
@@ -413,8 +419,98 @@ pub(crate) fn add_image_to_entity(
         ],
     )?;
 
+    // Camera/timestamp EXIF fields (if any) become entity_attributes on
+    // this SAME fact — this is evidence discovered via this exact upload
+    // event, so it belongs on that fact, not a new one. Kept inside this
+    // transaction (unlike the Location entity/relationship below) since
+    // it's a plain INSERT against the same fact_id, not a call into
+    // another crud function that needs its own transaction.
+    let exif_attrs: Vec<(&str, &str)> = [
+        ("camera_make", metadata.camera_make.as_deref()),
+        ("camera_model", metadata.camera_model.as_deref()),
+        ("software", metadata.software.as_deref()),
+        ("taken_at", metadata.taken_at.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(key, value)| value.map(|v| (key, v)))
+    .collect();
+    if !exif_attrs.is_empty() {
+        let mut insert_attr = tx.prepare(
+            "INSERT INTO entity_attributes (id, entity_id, fact_id, key, value) VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for (key, value) in &exif_attrs {
+            insert_attr.execute(params![
+                Uuid::new_v4().to_string(),
+                entity_id.0.to_string(),
+                fact_id.to_string(),
+                key,
+                value,
+            ])?;
+        }
+    }
+
     tx.commit()?;
+
+    // GPS becomes a real Location entity + LocatedAt relationship, not
+    // just another attribute — same "one finding, an entity and a
+    // relationship" shape `scan::ingest_check_result` already uses, and
+    // for the same structural reason: add_entity/add_relationship each
+    // open their own transaction against `conn`, so this has to run
+    // after `tx` above is committed and dropped, as a separate
+    // sequential step, not nested inside it.
+    if let Some((lat, long)) = metadata.gps {
+        if let Err(e) = attach_location_from_gps(conn, entity_id, lat, long) {
+            eprintln!(
+                "warning: image uploaded, but recording its GPS location failed ({e}); \
+                 the image itself was still saved successfully"
+            );
+        }
+    }
+
     Ok(FactId(fact_id))
+}
+
+/// Best-effort follow-up to [`add_image_to_entity`]: creates (or, on a
+/// second photo from the same spot, auto-merges onto) a `Location`
+/// entity keyed on the rounded coordinate pair, and links it to the
+/// photographed entity with a `LocatedAt` relationship. Coordinates are
+/// rounded to 6 decimal places (~11cm) before becoming a key — precise
+/// enough to be meaningful, and a deterministic, reproducible string two
+/// photos of the exact same spot will actually match on (SPEC.md's
+/// exact-key-only auto-merge policy means two *merely close* readings
+/// deliberately do not merge — that's a manual `entity merge`, not this).
+fn attach_location_from_gps(
+    conn: &mut Connection,
+    photographed_entity_id: EntityId,
+    lat: f64,
+    long: f64,
+) -> Result<(), EngineError> {
+    let key = format!("{lat:.6},{long:.6}");
+    let provenance = Provenance {
+        source: "exif".to_string(),
+        source_version: env!("CARGO_PKG_VERSION").to_string(),
+        source_url: None,
+        retrieval_method: Some("EXIF metadata".to_string()),
+        raw_response_sha256: None,
+        collected_at_unix_ms: now_unix_ms(),
+    };
+
+    let location_id = add_entity(
+        conn,
+        EntityType::Location,
+        Some(key),
+        Vec::new(),
+        provenance.clone(),
+    )?;
+    add_relationship(
+        conn,
+        photographed_entity_id,
+        location_id,
+        RelationshipType::LocatedAt,
+        Vec::new(),
+        provenance,
+    )?;
+    Ok(())
 }
 
 /// Metadata (no BLOB) for every image on an entity, newest first. Mirrors
@@ -1487,6 +1583,156 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, EngineError::EntityNotFound(_)));
+    }
+
+    const EXIF_GPS_FIXTURE: &[u8] = include_bytes!("../tests/fixtures/exif_gps.jpg");
+    const NO_EXIF_FIXTURE: &[u8] = include_bytes!("../tests/fixtures/no_exif.jpg");
+
+    #[test]
+    fn add_image_to_entity_creates_a_location_and_locates_the_photographed_entity() {
+        let mut conn = test_conn();
+        let person = add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("frank".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        add_image_to_entity(
+            &mut conn,
+            person,
+            "image/jpeg".to_string(),
+            EXIF_GPS_FIXTURE.to_vec(),
+            test_provenance(),
+        )
+        .unwrap();
+
+        // The fixture's DMS-encoded 74°02'40.21"W rounds to 74.044503 (not
+        // .044502) at 6 decimal places once run through degrees+minutes/60
+        // +seconds/3600 — this is that exact computed value, not a typo.
+        let location = find_entity_by_key(&conn, EntityType::Location, "40.689247,-74.044503")
+            .unwrap()
+            .expect("GPS in the fixture should create a Location entity");
+
+        let rels = list_relationships(&conn, true).unwrap();
+        assert!(
+            rels.iter().any(|r| r.from == person
+                && r.to == location.id
+                && r.relationship_type == RelationshipType::LocatedAt),
+            "expected a LocatedAt relationship from the photographed entity to the Location"
+        );
+    }
+
+    #[test]
+    fn add_image_to_entity_merges_onto_the_same_location_on_a_second_upload() {
+        let mut conn = test_conn();
+        let person = add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("grace".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        add_image_to_entity(
+            &mut conn,
+            person,
+            "image/jpeg".to_string(),
+            EXIF_GPS_FIXTURE.to_vec(),
+            test_provenance(),
+        )
+        .unwrap();
+        add_image_to_entity(
+            &mut conn,
+            person,
+            "image/jpeg".to_string(),
+            EXIF_GPS_FIXTURE.to_vec(),
+            test_provenance(),
+        )
+        .unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM entities WHERE entity_type = 'Location'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "two photos of the same spot must not create two Locations"
+        );
+    }
+
+    #[test]
+    fn add_image_to_entity_attaches_camera_and_timestamp_attributes_to_the_image_fact() {
+        let mut conn = test_conn();
+        let person = add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("heidi".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let fact_id = add_image_to_entity(
+            &mut conn,
+            person,
+            "image/jpeg".to_string(),
+            EXIF_GPS_FIXTURE.to_vec(),
+            test_provenance(),
+        )
+        .unwrap();
+
+        let attrs = list_attribute_records(&conn, person).unwrap();
+        let by_key: std::collections::HashMap<&str, &str> = attrs
+            .iter()
+            .map(|a| (a.key.as_str(), a.value.as_str()))
+            .collect();
+        assert_eq!(by_key.get("camera_make"), Some(&"Apple"));
+        assert_eq!(by_key.get("camera_model"), Some(&"iPhone 14 Pro"));
+        assert_eq!(by_key.get("software"), Some(&"17.4.1"));
+        assert_eq!(by_key.get("taken_at"), Some(&"2024-05-01T10:30:00"));
+        assert!(
+            attrs.iter().all(|a| a.fact_id == fact_id),
+            "EXIF attributes should be tied to the same fact as the image itself"
+        );
+    }
+
+    #[test]
+    fn add_image_to_entity_with_no_exif_attaches_normally_with_no_extra_entities() {
+        let mut conn = test_conn();
+        let person = add_entity(
+            &mut conn,
+            EntityType::Person,
+            Some("ivan".to_string()),
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        add_image_to_entity(
+            &mut conn,
+            person,
+            "image/jpeg".to_string(),
+            NO_EXIF_FIXTURE.to_vec(),
+            test_provenance(),
+        )
+        .unwrap();
+
+        assert!(list_attribute_records(&conn, person).unwrap().is_empty());
+        assert!(list_relationships(&conn, true).unwrap().is_empty());
+        let count: i64 = conn
+            .query_row("SELECT count(*) FROM entities", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "no EXIF should mean no extra entities beyond the person itself"
+        );
     }
 
     #[test]
