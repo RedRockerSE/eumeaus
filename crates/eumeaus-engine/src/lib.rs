@@ -7,6 +7,7 @@
 
 mod case;
 mod crud;
+mod exif_extract;
 mod keystore;
 pub mod plugins;
 pub mod report;

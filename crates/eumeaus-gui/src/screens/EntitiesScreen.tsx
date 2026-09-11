@@ -309,6 +309,10 @@ export default function EntitiesScreen({
       await entityAddImage(selectedId, path);
       const list = await entityListImages(selectedId);
       setImages(list);
+      // An upload can now create a new Location entity too (EXIF GPS
+      // extraction) — refresh() picks that up in the list, same as
+      // addEntity/doMerge/doHide already do for their own new entities.
+      await refresh();
       onEntitiesChanged(); // bumps the Overview screen's fact_count
     } catch (e) {
       setError(String(e));
