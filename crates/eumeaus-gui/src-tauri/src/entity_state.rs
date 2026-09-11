@@ -274,23 +274,56 @@ fn do_entity_show(cell: &Arc<Mutex<Option<Case>>>, id: &str) -> Result<EntityDet
     })
 }
 
+/// Returns the new/updated entity plus whether a genuinely new row was
+/// inserted (vs. an existing `(entity_type, canonical_key)` match being
+/// appended to) — the `entity_add` command uses that flag to decide
+/// whether SPEC.md §9.3's auto-scan-on-add should fire; re-adding/
+/// touching an already-known entity must not re-trigger a scan.
 fn do_entity_add(
     cell: &Arc<Mutex<Option<Case>>>,
     entity_type: &str,
     key: Option<String>,
     attrs: Vec<AttributeInput>,
-) -> Result<EntitySummary, String> {
+) -> Result<(EntitySummary, bool), String> {
     let mut guard = cell.lock().unwrap();
     let case = guard.as_mut().ok_or(NO_CASE_OPEN)?;
 
     let entity_type: EntityType = entity_type.parse().expect("infallible");
     let attrs: Vec<Attribute> = attrs.into_iter().map(Attribute::from).collect();
-    let id = case
-        .add_entity(entity_type, key, attrs, manual_provenance())
+    let (id, is_new) = case
+        .add_entity_with_outcome(entity_type, key, attrs, manual_provenance())
         .map_err(|e| e.to_string())?;
-    case.get_entity(id)
+    let summary = case
+        .get_entity(id)
         .map(EntitySummary::from)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok((summary, is_new))
+}
+
+/// After a genuinely new entity is saved, fires SPEC.md §9.3's
+/// auto-scan-on-add: every plugin compatible with its type, gated behind
+/// the persisted `auto_scan_enabled` setting (default off, see
+/// `settings_state.rs`) and only meaningful once a plugins directory is
+/// configured. Both checks failing (setting off, or no plugins dir set)
+/// is the common, expected case — a silent no-op, not an error — same
+/// posture `scan_state::spawn_auto_scan` takes for "no compatible
+/// plugin."
+async fn maybe_auto_scan(app: &tauri::AppHandle, state: &AppState, entity_id: &str) {
+    let Ok(true) = crate::settings_state::settings_get_auto_scan_enabled().await else {
+        return;
+    };
+    let Ok(Some(plugins_dir)) = crate::settings_state::settings_get_plugins_dir().await else {
+        return;
+    };
+    let Ok(uuid) = entity_id.parse() else {
+        return;
+    };
+    crate::scan_state::spawn_auto_scan(
+        app.clone(),
+        state,
+        plugins_dir,
+        eumeaus_engine::TargetEntity { id: EntityId(uuid) },
+    );
 }
 
 /// Adds a fact directly to an *existing* entity (SPEC.md §9.3, the
@@ -659,15 +692,24 @@ fn do_relationship_add(
 
 #[tauri::command]
 pub async fn entity_add(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     entity_type: String,
     key: Option<String>,
     attrs: Vec<AttributeInput>,
 ) -> Result<EntitySummary, String> {
     let cell = state.0.clone();
-    tauri::async_runtime::spawn_blocking(move || do_entity_add(&cell, &entity_type, key, attrs))
-        .await
-        .map_err(|e| e.to_string())?
+    let (summary, is_new) = tauri::async_runtime::spawn_blocking(move || {
+        do_entity_add(&cell, &entity_type, key, attrs)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    if is_new {
+        maybe_auto_scan(&app, &state, &summary.id).await;
+    }
+
+    Ok(summary)
 }
 
 #[tauri::command]
@@ -1067,7 +1109,7 @@ mod tests {
         let case = Case::create(dir.path(), "g4-add").unwrap();
         let cell = tmp_cell_with_case(case);
 
-        let created = do_entity_add(
+        let (created, is_new) = do_entity_add(
             &cell,
             "Email",
             Some("eve@example.com".to_string()),
@@ -1078,12 +1120,33 @@ mod tests {
         )
         .unwrap();
 
+        assert!(is_new, "a fresh key must report as a newly created entity");
         assert_eq!(created.entity_type, "Email");
         assert_eq!(created.canonical_key.as_deref(), Some("eve@example.com"));
 
         let shown = do_entity_show(&cell, &created.id).unwrap();
         assert_eq!(shown.attributes.len(), 1);
         assert_eq!(shown.attributes[0].key, "verified");
+    }
+
+    #[test]
+    fn entity_add_reports_merged_not_new_on_a_second_add_with_the_same_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = Case::create(dir.path(), "g4-add-merge").unwrap();
+        let cell = tmp_cell_with_case(case);
+
+        let (first, first_is_new) =
+            do_entity_add(&cell, "Email", Some("eve@example.com".to_string()), vec![]).unwrap();
+        assert!(first_is_new);
+
+        let (second, second_is_new) =
+            do_entity_add(&cell, "Email", Some("EVE@example.com".to_string()), vec![]).unwrap();
+
+        assert_eq!(first.id, second.id, "same normalized key must auto-merge");
+        assert!(
+            !second_is_new,
+            "merging onto an existing entity must not report as new"
+        );
     }
 
     #[test]

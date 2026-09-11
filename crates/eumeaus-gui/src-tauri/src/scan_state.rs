@@ -13,7 +13,7 @@
 //! independently of the `Mutex`-guarded `Case`, so it isn't blocked by
 //! the scan holding that lock.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use eumeaus_engine::{
@@ -115,6 +115,88 @@ fn do_scan_resume(
         .map_err(|e| e.to_string())
 }
 
+/// Same as [`do_scan_create`], but for a caller that already has a
+/// resolved [`TargetEntity`] in hand (SPEC.md §9.3's auto-scan-on-add,
+/// `entity_state.rs`'s `maybe_auto_scan`) and so has no need for
+/// `do_scan_create`'s own type+key lookup — the entity was just created
+/// in the same call. Always runs every plugin compatible with the
+/// target's type (empty `plugin_names`), same as `scan_run`'s own
+/// no-`--plugin`-given default.
+fn do_scan_create_for_target(
+    cell: &Arc<Mutex<Option<Case>>>,
+    plugins_dir: &Path,
+    target: TargetEntity,
+) -> Result<ScanId, String> {
+    let mut guard = cell.lock().unwrap();
+    let case = guard.as_mut().ok_or(NO_CASE_OPEN)?;
+    case.create_scan(
+        plugins_dir,
+        vec![],
+        target,
+        ScanConfig::default(),
+        &TrustPolicy::AllowUnsigned,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Runs `scan_id` to completion, forwarding each progress event to the
+/// frontend via the same `scan-progress` Tauri event `scan_run` and
+/// [`spawn_auto_scan`] both rely on for the sidebar dot / status bar
+/// indicator (`App.tsx`) to light up identically either way.
+async fn resume_and_emit_progress(
+    app: tauri::AppHandle,
+    cell: Arc<Mutex<Option<Case>>>,
+    scan_id: ScanId,
+) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ScanProgressEvent>();
+
+    let forward = tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            let _ = app.emit(SCAN_PROGRESS_EVENT, ScanProgressDto::from(event));
+        }
+    });
+
+    // tx moves in here and drops when the closure returns, which is what
+    // lets forward's `rx.recv()` loop above see the end of the scan and
+    // exit.
+    let _ = tauri::async_runtime::spawn_blocking(move || do_scan_resume(&cell, scan_id, &tx)).await;
+
+    let _ = forward.await;
+}
+
+/// Fires an unattended scan of `target` using every plugin discovered in
+/// `plugins_dir` compatible with its entity type — the GUI's
+/// auto-scan-on-add feature (SPEC.md §9.3), triggered from
+/// `entity_state.rs`'s `maybe_auto_scan` right after a genuinely new
+/// entity is saved. Deliberately fire-and-forget with no error reported
+/// anywhere: unlike `scan_run` (a user clicked "Run scan" and expects to
+/// see a failure), nothing here was an explicit request, so "no
+/// compatible plugin," "bad plugins dir," or any other `create_scan`
+/// failure is a silent no-op — an investigator who just added a `Person`
+/// entity should not see an error just because no plugin accepts
+/// `Person`.
+pub(crate) fn spawn_auto_scan(
+    app: tauri::AppHandle,
+    state: &AppState,
+    plugins_dir: String,
+    target: TargetEntity,
+) {
+    let cell = state.0.clone();
+    let cell_for_resume = state.0.clone();
+    tauri::async_runtime::spawn(async move {
+        let plugins_dir = PathBuf::from(plugins_dir);
+        let scan_id = match tauri::async_runtime::spawn_blocking(move || {
+            do_scan_create_for_target(&cell, &plugins_dir, target)
+        })
+        .await
+        {
+            Ok(Ok(id)) => id,
+            _ => return,
+        };
+        resume_and_emit_progress(app, cell_for_resume, scan_id).await;
+    });
+}
+
 fn do_scan_list(cell: &Arc<Mutex<Option<Case>>>) -> Result<Vec<ScanSummaryDto>, String> {
     let guard = cell.lock().unwrap();
     let case = guard.as_ref().ok_or(NO_CASE_OPEN)?;
@@ -146,25 +228,7 @@ pub async fn scan_run(
     .map_err(|e| e.to_string())??;
 
     let cell_for_resume = state.0.clone();
-    tauri::async_runtime::spawn(async move {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ScanProgressEvent>();
-
-        let forward = tauri::async_runtime::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                let _ = app.emit(SCAN_PROGRESS_EVENT, ScanProgressDto::from(event));
-            }
-        });
-
-        // tx moves in here and drops when the closure returns, which is
-        // what lets forward's `rx.recv()` loop above see the end of the
-        // scan and exit.
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            do_scan_resume(&cell_for_resume, scan_id, &tx)
-        })
-        .await;
-
-        let _ = forward.await;
-    });
+    tauri::async_runtime::spawn(resume_and_emit_progress(app, cell_for_resume, scan_id));
 
     Ok(scan_id.to_string())
 }
@@ -243,6 +307,44 @@ mod tests {
         assert!(err.contains("Username"));
 
         // Nothing was created — list_scans stays empty.
+        assert!(do_scan_list(&cell).unwrap().is_empty());
+    }
+
+    #[test]
+    fn create_for_target_errors_cleanly_with_no_case_open() {
+        let cell: Arc<Mutex<Option<Case>>> = Arc::new(Mutex::new(None));
+        let err = do_scan_create_for_target(
+            &cell,
+            Path::new("/nonexistent"),
+            TargetEntity {
+                id: eumeaus_engine::EntityId(uuid::Uuid::new_v4()),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err, NO_CASE_OPEN);
+    }
+
+    // Mirrors create_surfaces_no_compatible_plugins_as_a_plain_error_string
+    // above, but through the already-resolved-target path
+    // spawn_auto_scan/maybe_auto_scan use (SPEC.md §9.3) instead of
+    // do_scan_create's type+key lookup — this is the exact case a Person
+    // entity hits under auto-scan-on-add: create_scan still surfaces
+    // NoCompatiblePlugins here (spawn_auto_scan is what swallows it as a
+    // silent no-op, one layer up, since it has no AppHandle-free way to
+    // be exercised in a unit test).
+    #[test]
+    fn create_for_target_surfaces_no_compatible_plugins_as_a_plain_error_string() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "g3-auto-scan-no-plugins").unwrap();
+        let id = case
+            .add_entity(EntityType::Person, None, vec![], manual_provenance())
+            .unwrap();
+        let cell = Arc::new(Mutex::new(Some(case)));
+        let empty_plugins_dir = dir.path().join("plugins");
+
+        let err =
+            do_scan_create_for_target(&cell, &empty_plugins_dir, TargetEntity { id }).unwrap_err();
+        assert!(err.contains("Person"));
         assert!(do_scan_list(&cell).unwrap().is_empty());
     }
 }

@@ -397,6 +397,21 @@ impl Case {
         crud::add_entity(&mut self.conn, entity_type, key, attrs, provenance)
     }
 
+    /// Same as [`Case::add_entity`], but also reports whether a new entity
+    /// row was actually inserted (`true`) vs. an existing `(entity_type,
+    /// canonical_key)` match was appended to instead (`false`) — the GUI's
+    /// auto-scan-on-add feature (SPEC.md §9.3) needs this so re-adding/
+    /// touching an already-known entity doesn't re-trigger a scan.
+    pub fn add_entity_with_outcome(
+        &mut self,
+        entity_type: EntityType,
+        key: Option<String>,
+        attrs: Vec<Attribute>,
+        provenance: Provenance,
+    ) -> Result<(EntityId, bool), EngineError> {
+        crud::add_entity_with_outcome(&mut self.conn, entity_type, key, attrs, provenance)
+    }
+
     pub fn add_fact_to_entity(
         &mut self,
         entity_id: EntityId,

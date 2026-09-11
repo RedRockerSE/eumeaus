@@ -20,7 +20,10 @@ use overview_state::{audit_list, case_stats};
 use plugin_state::{plugin_install, plugin_list, plugin_verify};
 use report_state::{case_export, report_verify};
 use scan_state::{scan_list, scan_run};
-use settings_state::{settings_get_plugins_dir, settings_set_plugins_dir};
+use settings_state::{
+    settings_get_auto_scan_enabled, settings_get_plugins_dir, settings_set_auto_scan_enabled,
+    settings_set_plugins_dir,
+};
 use trust_state::{trust_add, trust_list, trust_remove};
 
 // G0 (SPEC.md §9.6): a trivial command that genuinely round-trips into
@@ -114,6 +117,8 @@ pub fn run() {
             trust_remove,
             settings_get_plugins_dir,
             settings_set_plugins_dir,
+            settings_get_auto_scan_enabled,
+            settings_set_auto_scan_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
