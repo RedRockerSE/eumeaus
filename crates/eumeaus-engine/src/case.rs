@@ -858,6 +858,23 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// Renders a stored unix-ms timestamp as a human-readable UTC datestamp
+/// (RFC 3339, e.g. `2026-09-11T14:32:07Z`) for the HTML report — every
+/// other consumer of `*_unix_ms` (the CLI, the GUI's own DTOs) is a
+/// machine-facing value on purpose, but a report is read by a person.
+/// Falls back to the raw millisecond value on any conversion error
+/// (there isn't a realistic one for a timestamp this project itself
+/// generated) rather than failing the whole export over a display nicety.
+fn format_unix_ms_utc(unix_ms: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(unix_ms.div_euclid(1000))
+        .ok()
+        .and_then(|dt| {
+            dt.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_else(|| unix_ms.to_string())
+}
+
 const REPORT_CSS: &str = "\
 body { font-family: sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }\
 h1, h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.3rem; }\
@@ -867,6 +884,7 @@ table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }\
 th, td { border: 1px solid #ddd; padding: 0.3rem 0.5rem; text-align: left; font-size: 0.9rem; }\
 th { background: #f5f5f5; }\
 code { background: #f5f5f5; padding: 0.1rem 0.3rem; border-radius: 3px; }\
+code.faint { background: none; color: #888; padding: 0; }\
 ";
 
 /// Same underlying data as [`export_report`], rendered as a self-contained
@@ -886,7 +904,7 @@ fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
     html.push_str(&format!(
         "<p>Case ID: <code>{}</code><br>Generated: {}</p>\n",
         case.case_id,
-        crate::now_unix_ms()
+        format_unix_ms_utc(crate::now_unix_ms())
     ));
 
     html.push_str("<h2>Entities</h2>\n");
@@ -900,6 +918,13 @@ fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
     if entities.is_empty() {
         html.push_str("<p><em>None.</em></p>\n");
     }
+    // Built before the loop below consumes `entities` — the Relationships
+    // section (after it) needs to resolve each endpoint's id to something
+    // an investigator can actually read, not a bare UUID.
+    let entity_names: std::collections::HashMap<EntityId, String> = entities
+        .iter()
+        .map(|e| (e.id, format!("{} ({})", e.display_label, e.entity_type)))
+        .collect();
     for entity in entities {
         let attrs = crud::list_attribute_records(&case.conn, entity.id)?;
         let audit = crud::audit_trail(&case.conn, AuditTarget::Entity(entity.id))?;
@@ -931,7 +956,7 @@ fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
                     html_escape(&a.key),
                     html_escape(&a.value),
                     html_escape(&a.source),
-                    a.collected_at_unix_ms,
+                    format_unix_ms_utc(a.collected_at_unix_ms),
                     a.fact_id,
                 ));
             }
@@ -942,7 +967,7 @@ fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
             for e in &audit {
                 html.push_str(&format!(
                     "<li>{} — {} by {}: {}</li>\n",
-                    e.occurred_at_unix_ms,
+                    format_unix_ms_utc(e.occurred_at_unix_ms),
                     html_escape(&e.event_type),
                     html_escape(&e.actor),
                     html_escape(&e.description)
@@ -960,12 +985,22 @@ fn export_html(case: &Case, dest: &Path) -> Result<(), EngineError> {
     } else {
         html.push_str("<table><tr><th>From</th><th>Type</th><th>To</th><th>Created</th></tr>\n");
         for r in &relationships {
+            let from_label = entity_names
+                .get(&r.from)
+                .cloned()
+                .unwrap_or_else(|| r.from.to_string());
+            let to_label = entity_names
+                .get(&r.to)
+                .cloned()
+                .unwrap_or_else(|| r.to.to_string());
             html.push_str(&format!(
-                "<tr><td><code>{}</code></td><td>{}</td><td><code>{}</code></td><td>{}</td></tr>\n",
+                "<tr><td>{} <code class=\"faint\">{}</code></td><td>{}</td><td>{} <code class=\"faint\">{}</code></td><td>{}</td></tr>\n",
+                html_escape(&from_label),
                 r.from,
                 html_escape(&r.relationship_type.to_string()),
+                html_escape(&to_label),
                 r.to,
-                r.created_at_unix_ms
+                format_unix_ms_utc(r.created_at_unix_ms)
             ));
         }
         html.push_str("</table>\n");
@@ -1278,6 +1313,85 @@ mod tests {
         );
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(html.contains("value with &lt;b&gt;tags&lt;/b&gt; &amp; &quot;quotes&quot;"));
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn export_html_renders_timestamps_as_utc_datestamps_not_epoch_millis() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "export-html-timestamps").unwrap();
+        // test_provenance()'s collected_at_unix_ms is a fixed 1000 (1s
+        // past the epoch) — a deterministic, easy-to-assert-on value. An
+        // attribute is required for that timestamp to actually render
+        // (an attribute-less entity's "Collected" column never appears).
+        case.add_entity(
+            EntityType::Person,
+            None,
+            vec![Attribute {
+                key: "note".to_string(),
+                value: "x".to_string(),
+            }],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let dest = dir.path().join("report.html");
+        case.export(&dest, ExportFormat::Html).unwrap();
+        let html = fs::read_to_string(&dest).unwrap();
+
+        assert!(
+            html.contains("1970-01-01T00:00:01Z"),
+            "collected_at_unix_ms=1000 should render as an RFC3339 UTC datestamp:\n{html}"
+        );
+        assert!(
+            !html.contains(">1000<"),
+            "the raw epoch-ms value should not appear as its own table cell:\n{html}"
+        );
+
+        cleanup(&case);
+    }
+
+    #[test]
+    fn export_html_resolves_relationship_endpoints_to_entity_names_not_raw_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut case = Case::create(dir.path(), "export-html-relationships").unwrap();
+        let alice = case
+            .add_entity(
+                EntityType::Person,
+                Some("alice".to_string()),
+                vec![],
+                test_provenance(),
+            )
+            .unwrap();
+        let bob = case
+            .add_entity(
+                EntityType::Person,
+                Some("bob".to_string()),
+                vec![],
+                test_provenance(),
+            )
+            .unwrap();
+        case.add_relationship(
+            alice,
+            bob,
+            RelationshipType::AssociatedWith,
+            vec![],
+            test_provenance(),
+        )
+        .unwrap();
+
+        let dest = dir.path().join("report.html");
+        case.export(&dest, ExportFormat::Html).unwrap();
+        let html = fs::read_to_string(&dest).unwrap();
+
+        assert!(
+            html.contains("alice (Person)") && html.contains("bob (Person)"),
+            "relationship endpoints should show a readable entity name, not just an id:\n{html}"
+        );
+        // The raw ids stay present (de-emphasized) for provenance tracing.
+        assert!(html.contains(&alice.to_string()));
+        assert!(html.contains(&bob.to_string()));
 
         cleanup(&case);
     }
