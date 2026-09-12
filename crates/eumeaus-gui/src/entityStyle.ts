@@ -75,6 +75,7 @@ const DIRECTIONAL_RELATIONSHIP_TYPES = new Set([
   "MemberOf",
   "ResolvesTo",
   "Mentions",
+  "HasSubdomain",
 ]);
 
 export function isDirectionalRelationship(relationshipType: string): boolean {
