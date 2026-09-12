@@ -459,6 +459,22 @@ original casing the value was entered with. If your plugin's target type
 is case-sensitive, this is why it just works — you don't need to do
 anything differently.
 
+A fifth, `crates/eumeaus-email-accounts-plugin/`, is worth reading for a
+pattern the others don't hit: a *ported* technique (issue #24, from
+[holehe](https://github.com/megadose/holehe)) rather than one designed
+from scratch, and a real correctness bug this project's own end-to-end
+testing caught before shipping. Its `Detection::JsonIntegerField` was
+originally written to only encode the "taken" value, treating anything
+else as "not taken" — live testing against the real Spotify endpoint
+found it actually answers a third, undocumented status code under some
+conditions, which the original code silently misreported as a confident
+not-found. The shipped version encodes both the taken *and* known-not-
+taken values, mapping anything else to `ConfidenceStatus::Uncertain`
+instead — the same "an honest 'couldn't tell' isn't the same claim as
+'not found'" principle §3.3 above already covers for a 429, just showing
+up in a subtler, JSON-body-encoded form here instead of an HTTP status
+code.
+
 §3's promise that this protocol doesn't require Rust has a real example
 backing it: [`eumeaus-phone-lookup-plugin-python/`](./eumeaus-phone-lookup-plugin-python/)
 (repo root, not under `crates/` — it isn't a Cargo crate) implements the
