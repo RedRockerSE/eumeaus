@@ -475,6 +475,29 @@ instead — the same "an honest 'couldn't tell' isn't the same claim as
 up in a subtler, JSON-body-encoded form here instead of an HTTP status
 code.
 
+A sixth, `crates/eumeaus-subdomain-lookup-plugin/`, is worth reading for
+a pattern none of the others hit: a *retried* HTTP call. It queries
+crt.sh's Certificate Transparency search API (issue #25) for a `Domain`
+entity's logged certificates, and crt.sh is genuinely flaky in normal
+operation — live testing during development saw both a bare `502 Bad
+Gateway` and an outright connection failure, each succeeding on a bare
+retry moments later with no code change. `check_domain` retries a
+transport error or non-2xx status a bounded number of times before
+giving up as `ConfidenceStatus::Uncertain` — the service being
+unavailable isn't evidence the domain has no subdomains, so it gets the
+same "honest couldn't tell" treatment a 429 gets elsewhere, just reached
+after retries instead of immediately. It also demonstrates a practical
+cap on a *found* result: a single popular domain can have thousands of
+uniquely-logged subdomains (`cloudflare.com` returned 3,425 in live
+testing), so `MAX_SUBDOMAINS` caps how many become new case entities in
+one scan, with a stderr warning when truncated, rather than flooding the
+case or erroring out. A live end-to-end run against `example.com` during
+development also caught a genuine correctness bug no mock would have
+surfaced: crt.sh's `name_value` field doesn't only carry DNS
+hostnames — that response included an email-address SAN and a CA
+intermediate certificate's subject common name, neither a subdomain.
+`looks_like_hostname` filters both out.
+
 §3's promise that this protocol doesn't require Rust has a real example
 backing it: [`eumeaus-phone-lookup-plugin-python/`](./eumeaus-phone-lookup-plugin-python/)
 (repo root, not under `crates/` — it isn't a Cargo crate) implements the
