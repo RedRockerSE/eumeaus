@@ -102,6 +102,18 @@ cp "$extracted/plugins/crypto-wallet/eumeaus-crypto-wallet-plugin" "$crypto_wall
 cp "$extracted/plugins/crypto-wallet/plugin.toml" "$crypto_wallet_plugin_dir/"
 chmod +x "$crypto_wallet_plugin_dir/eumeaus-crypto-wallet-plugin"
 
+email_accounts_plugin_dir="$install_dir/eumeaus-plugins/email-accounts"
+mkdir -p "$email_accounts_plugin_dir"
+cp "$extracted/plugins/email-accounts/eumeaus-email-accounts-plugin" "$email_accounts_plugin_dir/"
+cp "$extracted/plugins/email-accounts/plugin.toml" "$email_accounts_plugin_dir/"
+chmod +x "$email_accounts_plugin_dir/eumeaus-email-accounts-plugin"
+
+subdomain_lookup_plugin_dir="$install_dir/eumeaus-plugins/subdomain-lookup"
+mkdir -p "$subdomain_lookup_plugin_dir"
+cp "$extracted/plugins/subdomain-lookup/eumeaus-subdomain-lookup-plugin" "$subdomain_lookup_plugin_dir/"
+cp "$extracted/plugins/subdomain-lookup/plugin.toml" "$subdomain_lookup_plugin_dir/"
+chmod +x "$subdomain_lookup_plugin_dir/eumeaus-subdomain-lookup-plugin"
+
 echo
 echo "Installed eumeaus ${version} to $install_dir/eumeaus"
 echo "Installed the bundled username-search plugin to $plugin_dir"
@@ -109,6 +121,8 @@ echo "Installed the bundled email-lookup plugin to $email_plugin_dir"
 echo "Installed the bundled ip-lookup plugin to $ip_plugin_dir"
 echo "Installed the bundled domain-lookup plugin to $domain_plugin_dir"
 echo "Installed the bundled crypto-wallet plugin to $crypto_wallet_plugin_dir"
+echo "Installed the bundled email-accounts plugin to $email_accounts_plugin_dir"
+echo "Installed the bundled subdomain-lookup plugin to $subdomain_lookup_plugin_dir"
 
 case ":$PATH:" in
     *":$install_dir:"*) ;;

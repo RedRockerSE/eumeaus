@@ -88,6 +88,14 @@ try {
     New-Item -ItemType Directory -Path $CryptoWalletPluginDir -Force | Out-Null
     Copy-Item (Join-Path $ExtractedDir "plugins\crypto-wallet\*") $CryptoWalletPluginDir -Force -Recurse
 
+    $EmailAccountsPluginDir = Join-Path $InstallDir "eumeaus-plugins\email-accounts"
+    New-Item -ItemType Directory -Path $EmailAccountsPluginDir -Force | Out-Null
+    Copy-Item (Join-Path $ExtractedDir "plugins\email-accounts\*") $EmailAccountsPluginDir -Force -Recurse
+
+    $SubdomainLookupPluginDir = Join-Path $InstallDir "eumeaus-plugins\subdomain-lookup"
+    New-Item -ItemType Directory -Path $SubdomainLookupPluginDir -Force | Out-Null
+    Copy-Item (Join-Path $ExtractedDir "plugins\subdomain-lookup\*") $SubdomainLookupPluginDir -Force -Recurse
+
     Write-Host ""
     Write-Host "Installed eumeaus $Version to $InstallDir\eumeaus.exe"
     Write-Host "Installed the bundled username-search plugin to $PluginDir"
@@ -95,6 +103,8 @@ try {
     Write-Host "Installed the bundled ip-lookup plugin to $IpPluginDir"
     Write-Host "Installed the bundled domain-lookup plugin to $DomainPluginDir"
     Write-Host "Installed the bundled crypto-wallet plugin to $CryptoWalletPluginDir"
+    Write-Host "Installed the bundled email-accounts plugin to $EmailAccountsPluginDir"
+    Write-Host "Installed the bundled subdomain-lookup plugin to $SubdomainLookupPluginDir"
 
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($UserPath -notlike "*$InstallDir*") {
