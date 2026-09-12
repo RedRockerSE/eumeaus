@@ -19,8 +19,8 @@ use crate::{
     crud, keystore, Actor, Attribute, AttributeRecord, AuditEvent, AuditTarget, CaseStats,
     CaseSummary, DocumentId, EngineError, Entity, EntityDocumentData, EntityDocumentSummary,
     EntityFilter, EntityId, EntityImageData, EntityImageSummary, EntityPosition, EntityType,
-    FactId, ImageId, PluginRef, Provenance, Relationship, RelationshipId, RelationshipType,
-    ScanConfig, ScanId, ScanStatus, ScanSummary, TargetEntity,
+    FactId, ImageId, MapPoint, PluginRef, Provenance, Relationship, RelationshipId,
+    RelationshipType, ScanConfig, ScanId, ScanStatus, ScanSummary, TargetEntity,
 };
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
@@ -595,6 +595,12 @@ impl Case {
     /// Case-wide counts for the GUI's Overview screen (SPEC.md §9.3).
     pub fn case_stats(&self) -> Result<CaseStats, EngineError> {
         crud::case_stats(&self.conn)
+    }
+
+    /// Every plottable point for the GUI's Map screen (SPEC.md §9.3) —
+    /// see [`crate::MapPoint`]'s own doc for the detection rules.
+    pub fn map_points(&self) -> Result<Vec<MapPoint>, EngineError> {
+        crud::list_map_points(&self.conn)
     }
 
     /// Runs `plugins` (or, if empty, every discovered plugin compatible

@@ -10,6 +10,7 @@ import Launcher from "./screens/Launcher";
 import OverviewScreen from "./screens/OverviewScreen";
 import EntitiesScreen from "./screens/EntitiesScreen";
 import GraphScreen from "./screens/GraphScreen";
+import MapScreen from "./screens/MapScreen";
 import ScansScreen from "./screens/ScansScreen";
 import PluginsScreen from "./screens/PluginsScreen";
 import SettingsScreen from "./screens/SettingsScreen";
@@ -121,6 +122,7 @@ function App() {
                 <EntitiesScreen onEntitiesChanged={refreshStats} scanCompletedTick={scanCompletedTick} />
               )}
               {screen === "graph" && <GraphScreen />}
+              {screen === "map" && <MapScreen />}
               {screen === "scans" && <ScansScreen />}
               {screen === "plugins" && <PluginsScreen />}
               {screen === "settings" && <SettingsScreen />}

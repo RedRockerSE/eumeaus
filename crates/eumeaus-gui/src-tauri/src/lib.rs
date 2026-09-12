@@ -1,6 +1,7 @@
 mod case_state;
 mod credential_state;
 mod entity_state;
+mod map_state;
 mod overview_state;
 mod plugin_state;
 mod report_state;
@@ -16,6 +17,7 @@ use entity_state::{
     entity_list_positions, entity_merge, entity_open_document, entity_set_position, entity_show,
     entity_split, entity_unhide, fact_redact, relationship_add, relationship_list,
 };
+use map_state::map_points;
 use overview_state::{audit_list, case_stats};
 use plugin_state::{plugin_install, plugin_list, plugin_verify};
 use report_state::{case_export, report_verify};
@@ -102,6 +104,7 @@ pub fn run() {
             relationship_list,
             case_stats,
             audit_list,
+            map_points,
             case_export,
             report_verify,
             scan_run,

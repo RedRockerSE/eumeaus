@@ -1,4 +1,4 @@
-export type Screen = "overview" | "entities" | "graph" | "scans" | "plugins" | "settings";
+export type Screen = "overview" | "entities" | "graph" | "map" | "scans" | "plugins" | "settings";
 
 function NavItem({
   label,
@@ -46,6 +46,7 @@ export default function Sidebar({
         count={entityCount}
       />
       <NavItem label="Graph" active={screen === "graph"} onClick={() => onNavigate("graph")} />
+      <NavItem label="Map" active={screen === "map"} onClick={() => onNavigate("map")} />
       <NavItem
         label="Scans"
         active={screen === "scans"}
