@@ -9,7 +9,7 @@
 //! to the case file purely to break that chicken-and-egg. It carries no
 //! secret; the encryption key stays in the OS keychain.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, ErrorCode};
@@ -50,14 +50,16 @@ pub enum ExportFormat {
     Html,
 }
 
-/// Opaque handle over an open, decrypted case DB connection + exclusive
-/// file lock. Dropping it (or calling [`Case::close`]) releases both.
+/// Opaque handle over an open, decrypted case DB connection. Held under
+/// SQLite's own `locking_mode = EXCLUSIVE` (see `init_case_file`'s doc
+/// comment for why) rather than a separate `std::fs`-level lock, so the
+/// OS file lock is released the same way: when `conn` is dropped (or
+/// [`Case::close`] is called).
 pub struct Case {
     path: PathBuf,
     case_id: Uuid,
     name: String,
     conn: Connection,
-    _lock: File,
 }
 
 impl std::fmt::Debug for Case {
@@ -101,10 +103,9 @@ impl Case {
         name: &str,
         hex_key: &str,
     ) -> Result<Case, EngineError> {
-        let lock = lock_exclusive(case_path)?;
-
         let mut conn = Connection::open(case_path)?;
         apply_key(&conn, hex_key)?;
+        set_exclusive_locking(&conn)?;
 
         let now = crate::now_unix_ms();
         let tx = conn.transaction()?;
@@ -127,7 +128,6 @@ impl Case {
             case_id,
             name: name.to_string(),
             conn,
-            _lock: lock,
         })
     }
 
@@ -140,13 +140,15 @@ impl Case {
             return Err(EngineError::CaseNotFound(path.to_path_buf()));
         }
 
-        let lock = lock_exclusive(path)?;
-
         let case_id = read_case_id(path)?;
         let hex_key = keystore::load_key(case_id)?;
 
         let conn = Connection::open(path)?;
         apply_key(&conn, &hex_key)?;
+        set_exclusive_locking(&conn)?;
+        // The first statement that actually touches the file (this one)
+        // is where a second process's conflicting lock surfaces as
+        // SQLITE_BUSY — verify_decryption maps that to CaseAlreadyOpen.
         verify_decryption(&conn, path)?;
         // No schema-version-checked migration system exists — this case
         // file may predate any table added to schema_additions.sql after
@@ -167,7 +169,6 @@ impl Case {
             case_id,
             name,
             conn,
-            _lock: lock,
         })
     }
 
@@ -319,7 +320,6 @@ impl Case {
         name: &str,
         hex_key: &str,
     ) -> Result<Case, EngineError> {
-        let lock = lock_exclusive(dest_path)?;
         let dest_str = dest_path.to_str().ok_or_else(|| {
             EngineError::CaseCorrupt(
                 dest_path.to_path_buf(),
@@ -363,6 +363,7 @@ impl Case {
         // the sidecar/keychain UUID Case::open relies on.
         let conn = Connection::open(dest_path)?;
         apply_key(&conn, hex_key)?;
+        set_exclusive_locking(&conn)?;
         conn.execute(
             "UPDATE case_meta SET value = ?1 WHERE key = 'case_id'",
             params![case_id.to_string()],
@@ -379,7 +380,6 @@ impl Case {
             case_id,
             name: name.to_string(),
             conn,
-            _lock: lock,
         })
     }
 
@@ -696,18 +696,27 @@ fn read_case_id(case_path: &Path) -> Result<Uuid, EngineError> {
     })
 }
 
-fn lock_exclusive(path: &Path) -> Result<File, EngineError> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)?;
-    file.try_lock().map_err(|err| match err {
-        std::fs::TryLockError::WouldBlock => EngineError::CaseAlreadyOpen(path.to_path_buf()),
-        std::fs::TryLockError::Error(io_err) => EngineError::Io(io_err),
-    })?;
-    Ok(file)
+/// Puts `conn` into SQLite's own `EXCLUSIVE` locking mode, so its OS-level
+/// file lock — once acquired on the connection's first real read or
+/// write — is never released back to `NORMAL` until the connection is
+/// dropped/closed. This is the *only* file lock a `Case` holds.
+///
+/// An earlier version of this instead opened a second `std::fs::File`
+/// handle on the same path purely to hold a separate advisory
+/// `File::try_lock()`. That worked on Linux (where it maps to `flock()`,
+/// which SQLite's own Unix VFS locking — `fcntl()` byte-range locks —
+/// never interacts with) but broke case creation/opening on Windows:
+/// `File::try_lock()` there maps to `LockFileEx`, a *mandatory* lock, and
+/// SQLite's Windows VFS also locks the file via `LockFileEx` — so our
+/// own lock and SQLite's own subsequent open of the identical path
+/// collided, surfacing to callers as a generic SQLite "disk I/O error"
+/// (`SQLITE_IOERR`) on every `case create`/`case open`. Relying on
+/// SQLite's own locking exclusively avoids ever taking two independent
+/// locks on the same file, which is correct — and the only thing that
+/// actually needs to be correct — on every platform SQLite supports.
+fn set_exclusive_locking(conn: &Connection) -> Result<(), EngineError> {
+    conn.execute_batch("PRAGMA locking_mode = EXCLUSIVE;")?;
+    Ok(())
 }
 
 fn apply_key(conn: &Connection, hex_key: &str) -> Result<(), EngineError> {
@@ -720,7 +729,11 @@ fn apply_key(conn: &Connection, hex_key: &str) -> Result<(), EngineError> {
 /// Forces SQLCipher to actually touch the encrypted pages, so a wrong key
 /// or a corrupt/tampered file fails here with a specific, clear error
 /// (SPEC.md §5) instead of surfacing as a confusing failure on first real
-/// query.
+/// query. Also the first statement to request a lock on `conn` since
+/// [`set_exclusive_locking`] — if another connection already holds this
+/// file's exclusive lock, that surfaces here as `SQLITE_BUSY`, mapped to
+/// [`EngineError::CaseAlreadyOpen`] rather than a raw "database is
+/// locked".
 fn verify_decryption(conn: &Connection, path: &Path) -> Result<(), EngineError> {
     match conn.query_row("SELECT count(*) FROM sqlite_master", [], |row| {
         row.get::<_, i64>(0)
@@ -731,6 +744,9 @@ fn verify_decryption(conn: &Connection, path: &Path) -> Result<(), EngineError> 
                 path.to_path_buf(),
                 "SQLCipher key was rejected, or the file is corrupt/tampered".to_string(),
             ))
+        }
+        Err(rusqlite::Error::SqliteFailure(err, _)) if err.code == ErrorCode::DatabaseBusy => {
+            Err(EngineError::CaseAlreadyOpen(path.to_path_buf()))
         }
         Err(e) => Err(EngineError::Sqlite(e)),
     }
@@ -1360,10 +1376,9 @@ mod tests {
         name: &str,
         hex_key: &str,
     ) -> Result<Case, EngineError> {
-        let lock = lock_exclusive(case_path)?;
-
         let mut conn = Connection::open(case_path)?;
         apply_key(&conn, hex_key)?;
+        set_exclusive_locking(&conn)?;
 
         let now = crate::now_unix_ms();
         let tx = conn.transaction()?;
@@ -1385,7 +1400,6 @@ mod tests {
             case_id,
             name: name.to_string(),
             conn,
-            _lock: lock,
         })
     }
 
