@@ -115,6 +115,13 @@ project's legal/ToS posture) and ships one-line installers
 
 ## GUI (`eumeaus-gui`)
 
+### [gui-v0.1.7] - 2026-09-14
+
+#### Fixed
+- Same Windows `case create`/`case open` disk I/O error as CLI v0.1.8
+  (the GUI links the same `eumeaus-engine` `Case` code) — see that
+  entry for the root cause.
+
 ### [gui-v0.1.6] - 2026-09-12
 
 #### Added
