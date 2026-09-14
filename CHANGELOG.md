@@ -8,6 +8,17 @@ and full asset lists.
 
 ## CLI (`eumeaus`)
 
+### [v0.1.8] - 2026-09-14
+
+#### Fixed
+- `case create`/`case open` failed on Windows with `database error: disk
+  I/O error`. `Case` held two independent locks on the same file — a
+  manual `std::fs::File::try_lock()` and SQLCipher's own internal file
+  locking — which collided under Windows' mandatory `LockFileEx`
+  semantics (harmless on Linux, where the two locking APIs never
+  interact). Replaced the manual lock with SQLite's own `PRAGMA
+  locking_mode = EXCLUSIVE`, so there's only ever one lock on the file.
+
 ### [v0.1.7] - 2026-09-12
 
 #### Added
