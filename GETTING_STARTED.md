@@ -4,8 +4,9 @@ This guide walks a new user through installing the Eumeaus desktop app,
 opening a first case, and running a first scan — no command line
 required. If you'd rather use the CLI, see [`CLI.md`](./CLI.md) instead.
 
-Screenshots are marked as placeholders below (`Screenshot: ...`) — drop
-the real images in as they're captured.
+A couple of screenshots below are still marked as placeholders
+(`Screenshot: ...`) — the Windows installer wizard itself can't be
+captured from Linux, and the Scans mid-run shot is still pending.
 
 ## 1. What Eumeaus is
 
@@ -67,8 +68,7 @@ step.
 
 On first launch you'll see the **Open a case** screen.
 
-> **Screenshot:** the Launcher screen, showing the "Open a case" and
-> "New case" forms.
+![The Launcher screen, showing the "Open a case" and "New case" forms](./docs/screenshots/launcher.png)
 
 Under **New case**, click **Browse…** to pick a folder for your case
 file, type a name (e.g. `first-case`), and click **New case…**. This
@@ -93,8 +93,7 @@ The sidebar on the left switches between:
 | **Plugins** | Install and manage plugins |
 | **Settings** | Default plugins folder, auto-scan, and other preferences |
 
-> **Screenshot:** the main window with the sidebar visible, on the
-> Overview screen.
+![The Overview screen for an in-progress case, showing entity/fact/relationship counts, storage info, the audit trail, and the export/verify cards](./docs/screenshots/overview.png)
 
 ## 6. Point Eumeaus at your plugins
 
@@ -103,8 +102,7 @@ Go to **Settings > General** and paste (or **Browse…** to) the
 the default plugins folder everywhere else in the app, so you won't
 need to re-enter it on the Scans or Plugins screens.
 
-> **Screenshot:** Settings > General, with the plugins directory field
-> filled in.
+![Settings > General, with the plugins directory field filled in and Auto-scan on add toggled on](./docs/screenshots/settings-general.png)
 
 ## 7. Add your first entity
 
@@ -112,10 +110,11 @@ Go to **Entities** and click **Add entity**. Pick a type (e.g.
 `Username`), type in the value you're investigating as the **Canonical
 key** (e.g. a handle), and click **Add entity**.
 
-> **Screenshot:** the Entities screen with the "New entity" form open
-> and filled in.
+Your new entity now appears in the list. Click any entity to see its
+detail view — every fact it carries, each one tagged with which plugin
+(or "user", if you typed it in yourself) found it and when:
 
-Your new entity now appears in the list.
+![The Entities screen: the full list on the left, and a Location entity's detail view on the right showing its facts, each tagged with source and collection time](./docs/screenshots/entities.png)
 
 ## 8. Run a scan
 
@@ -143,10 +142,9 @@ picks up only the plugins that hadn't finished.
 - **Map** plots anything with a location (an IP's geolocation, GPS data
   from an uploaded image, etc.) as a pin.
 
-> **Screenshot:** the Graph screen showing a small case with a few
-> connected entities.
+![The Graph screen: entities as nodes, relationships as labeled, directional edges](./docs/screenshots/graph.png)
 
-> **Screenshot:** the Map screen showing at least one pin.
+![The Map screen with one pin, from an IP address's geolocation](./docs/screenshots/map.png)
 
 ## 10. Optional: turn on auto-scan
 
@@ -162,7 +160,7 @@ From **Overview**, use **Export** to save a signed, self-contained HTML
 report of the whole case — entities, relationships, and where each fact
 came from — that opens in any browser, independent of Eumeaus itself.
 
-> **Screenshot:** the Overview screen's Export card.
+![The Overview screen's Export card, set to Report (HTML)](./docs/screenshots/export.png)
 
 ## Where to go next
 
