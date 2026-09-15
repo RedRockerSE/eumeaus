@@ -1,11 +1,12 @@
 # Eumeaus
 
 A local-first, plugin-extensible OSINT case management tool for investigators.
-See [`SPEC.md`](./SPEC.md) for the full design, [`CLI.md`](./CLI.md) for
-command reference and usage examples,
-[`plugin-developer-guide.md`](./plugin-developer-guide.md) if you want to
-write your own plugin, and [`SETUP.md`](./SETUP.md) for setting up a dev
-environment to build Eumeaus from source.
+New to the desktop app? Start with
+[`GETTING_STARTED.md`](./GETTING_STARTED.md). See [`SPEC.md`](./SPEC.md)
+for the full design, [`CLI.md`](./CLI.md) for command reference and
+usage examples, [`plugin-developer-guide.md`](./plugin-developer-guide.md)
+if you want to write your own plugin, and [`SETUP.md`](./SETUP.md) for
+setting up a dev environment to build Eumeaus from source.
 
 **Status:** v1 complete — all of `SPEC.md` §7's milestones (M0–M6) are
 done, including the full v1 proof (`SPEC.md` §6). Case lifecycle over real
