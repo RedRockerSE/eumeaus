@@ -80,6 +80,16 @@ cargo fmt --all
 Pre-commit hooks (`cargo fmt --check`, `cargo clippy`) are configured via
 [pre-commit](https://pre-commit.com/): `pip install pre-commit && pre-commit install`.
 
+## Scripts
+
+- [`scripts/sherlock-to-eumeaus.sh`](./scripts/sherlock-to-eumeaus.sh) —
+  runs [Sherlock](https://github.com/sherlock-project/sherlock) (a much
+  larger site catalog than `eumeaus-username-search-plugin`) against a
+  username and merges every claimed account it finds into an existing
+  case as `OnlineAccount` entities linked by `HasAccount`. Idempotent —
+  safe to re-run later to pick up newly-claimed sites. Run it with
+  `--help` for full usage.
+
 ## License
 
 Licensed under either of [Apache License, Version 2.0](./LICENSE-APACHE) or
